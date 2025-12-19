@@ -28,6 +28,7 @@ const cleanup = () => {
   ipcRenderer.removeAllListeners('mpv-closed');
   ipcRenderer.removeAllListeners('bluray-titles');
   ipcRenderer.removeAllListeners('switching-title');
+  ipcRenderer.removeAllListeners('confirm-exit');
 };
 
 /**
@@ -79,6 +80,9 @@ contextBridge.exposeInMainWorld('api', {
   /** 关闭窗口 */
   close: () => ipcRenderer.invoke('win-close'),
   
+  /** 强制关闭窗口 */
+  forceClose: () => ipcRenderer.invoke('win-force-close'),
+  
   /** 切换全屏状态 */
   fullscreen: () => ipcRenderer.invoke('win-fullscreen'),
   
@@ -125,6 +129,11 @@ contextBridge.exposeInMainWorld('api', {
   /** 监听标题切换中事件（显示加载提示） */
   onSwitchingTitle: (cb) => {
     ipcRenderer.on('switching-title', cb);
+  },
+  
+  /** 监听退出确认事件 */
+  onConfirmExit: (cb) => {
+    ipcRenderer.on('confirm-exit', cb);
   },
   
   // ==================== 清理 ====================

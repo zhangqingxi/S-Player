@@ -42,10 +42,12 @@
     ],
     "win": {
       "target": "portable",
-      "icon": "build/icon.ico"
+      "icon": "icon.ico",
+      "signAndEditExecutable": false
     },
     "portable": {
-      "artifactName": "S-Player.exe"
+      "artifactName": "${productName}-${version}.exe",
+      "unpackDirName": "S-Player"
     }
   }
 }

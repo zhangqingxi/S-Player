@@ -100,19 +100,9 @@ function createWindow() {
   // 关闭前确认（如果正在播放）
   mainWindow.on('close', (e) => {
     if (isPlayingContent) {
-      e.preventDefault();  // 阻止默认关闭行为
-      dialog.showMessageBox(mainWindow, {
-        type: 'question',
-        buttons: ['取消', '退出'],
-        defaultId: 1,
-        title: '确认退出',
-        message: '视频正在播放，确定要退出播放器吗？'
-      }).then(({ response }) => {
-        if (response === 1) {
-          isPlayingContent = false;
-          mainWindow.destroy();  // 强制关闭
-        }
-      });
+      e.preventDefault();
+      // 通知前端显示确认对话框
+      mainWindow?.webContents.send('confirm-exit');
     }
   });
   
@@ -533,6 +523,12 @@ ipcMain.handle('win-maximize', () => {
 
 /** 关闭窗口 */
 ipcMain.handle('win-close', () => mainWindow?.close());
+
+/** 强制关闭窗口（确认退出后调用） */
+ipcMain.handle('win-force-close', () => {
+  isPlayingContent = false;
+  mainWindow?.destroy();
+});
 
 /** 切换全屏 */
 ipcMain.handle('win-fullscreen', () => {

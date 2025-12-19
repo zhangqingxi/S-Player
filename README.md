@@ -1,5 +1,7 @@
 # S-Player
 
+<img src="logo.png" alt="S-Player" width="128">
+
 基于 MPV 的现代化桌面视频播放器，支持蓝光原盘、DVD、多音轨、多字幕。
 
 ## 功能特性
@@ -24,6 +26,9 @@
 ```bash
 # 安装依赖
 npm install
+
+# 下载 mpv.exe 放到项目根目录
+# https://mpv.io/installation/
 
 # 开发模式
 npm start

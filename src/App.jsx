@@ -225,12 +225,16 @@ function App() {
   const [currentAudio, setCurrentAudio] = useState(null);  // 当前音轨 ID
   const [currentSub, setCurrentSub] = useState(null);      // 当前字幕 ID
   const [currentTitle, setCurrentTitle] = useState(null);  // 当前蓝光标题
+  
+  // 退出确认对话框
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   // ==================== Refs ====================
   
   const initialized = useRef(false);           // 防止重复初始化
   const hideTimer = useRef(null);              // 控制栏隐藏定时器
   const autoSelectDoneRef = useRef(false);     // 是否已完成自动选择
+  const switchingTimer = useRef(null);         // 切换提示关闭定时器
 
   // ==================== 初始化 ====================
   
@@ -254,17 +258,14 @@ function App() {
       setIsSwitching(false);
     });
 
-    // 用于延迟关闭 loading 的定时器
-    let switchingTimer = null;
-    
     // 监听 MPV 属性变化
     window.api.onMpvProp((name, val) => {
       // 播放位置 - 位置更新说明视频在正常播放
       if (name === 'time-pos' && typeof val === 'number') {
         setPosition(val);
         // 延迟 1 秒后关闭切换提示，避免闪烁
-        if (switchingTimer) clearTimeout(switchingTimer);
-        switchingTimer = setTimeout(() => setIsSwitching(false), 1000);
+        if (switchingTimer.current) clearTimeout(switchingTimer.current);
+        switchingTimer.current = setTimeout(() => setIsSwitching(false), 1000);
       }
       // 总时长
       else if (name === 'duration' && typeof val === 'number') {
@@ -376,6 +377,11 @@ function App() {
       setSwitchingText('正在切换标题...');
       setIsSwitching(true);
     });
+    
+    // 退出确认（从后端触发）
+    window.api.onConfirmExit(() => {
+      setShowExitConfirm(true);
+    });
 
     // 鼠标移动时显示控制栏，3秒后自动隐藏
     const handleMove = () => {
@@ -401,29 +407,25 @@ function App() {
   
   /** 打开文件 */
   const handleOpenFile = async () => {
-    setIsLoading(true);
     const filePath = await window.api.openFile();
     if (filePath) {
+      setIsLoading(true);  // 选择文件后才显示 loading
       setCurrentTitle(null);
       setBlurayTitles([]);
-      autoSelectDoneRef.current = false;  // 新文件需要重新自动选择
+      autoSelectDoneRef.current = false;
       window.api.play(filePath);
-    } else {
-      setIsLoading(false);  // 用户取消选择
     }
   };
 
   /** 打开文件夹（用于蓝光） */
   const handleOpenFolder = async () => {
-    setIsLoading(true);
     const filePath = await window.api.openFolder();
     if (filePath) {
+      setIsLoading(true);  // 选择文件夹后才显示 loading
       setCurrentTitle(null);
       setBlurayTitles([]);
       autoSelectDoneRef.current = false;
       window.api.play(filePath);
-    } else {
-      setIsLoading(false);
     }
   };
 
@@ -646,6 +648,24 @@ function App() {
         <div className="loading-overlay">
           <div className="loading-text">
             {isLoading ? '正在加载文件...' : switchingText}
+          </div>
+        </div>
+      )}
+      
+      {/* ========== 退出确认对话框 ========== */}
+      {showExitConfirm && (
+        <div className="confirm-overlay">
+          <div className="confirm-dialog">
+            <div className="confirm-title">确认退出</div>
+            <div className="confirm-message">视频正在播放，确定要退出吗？</div>
+            <div className="confirm-buttons">
+              <button className="confirm-btn cancel" onClick={() => setShowExitConfirm(false)}>
+                取消
+              </button>
+              <button className="confirm-btn confirm" onClick={() => window.api.forceClose()}>
+                退出
+              </button>
+            </div>
           </div>
         </div>
       )}
