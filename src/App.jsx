@@ -258,18 +258,27 @@ function App() {
       setIsSwitching(false);
     });
 
+    // 用于判断视频是否解析完成
+    let videoDuration = 0;
+    
     // 监听 MPV 属性变化
     window.api.onMpvProp((name, val) => {
-      // 播放位置 - 位置更新说明视频在正常播放
-      if (name === 'time-pos' && typeof val === 'number') {
-        setPosition(val);
-        // 延迟 1 秒后关闭切换提示，避免闪烁
-        if (switchingTimer.current) clearTimeout(switchingTimer.current);
-        switchingTimer.current = setTimeout(() => setIsSwitching(false), 1000);
-      }
-      // 总时长
-      else if (name === 'duration' && typeof val === 'number') {
+      // 总时长 - 有值说明视频解析完成
+      if (name === 'duration' && typeof val === 'number') {
+        videoDuration = val;
         setDuration(val);
+      }
+      // 播放位置 - 位置更新且有时长说明视频正常播放
+      else if (name === 'time-pos' && typeof val === 'number') {
+        setPosition(val);
+        // 只有 duration > 0 才关闭 loading
+        if (videoDuration > 0) {
+          if (switchingTimer.current) clearTimeout(switchingTimer.current);
+          switchingTimer.current = setTimeout(() => {
+            setIsSwitching(false);
+            setIsLoading(false);
+          }, 500);
+        }
       }
       // 暂停状态（MPV 的 pause 为 true 表示暂停）
       else if (name === 'pause') {
