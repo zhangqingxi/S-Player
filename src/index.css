@@ -1,0 +1,468 @@
+/**
+ * S-Player - 全局样式
+ * 
+ * 【样式架构】
+ * 1. 基础重置 - 清除默认样式
+ * 2. 标题栏 - 自定义窗口控制
+ * 3. 信息面板 - 媒体信息显示
+ * 4. 加载提示 - 加载状态
+ * 5. 欢迎页 - 首页界面
+ * 6. 控制栏 - 播放控制
+ * 7. 菜单 - 轨道切换菜单
+ * 
+ * 【关键技术点】
+ * - pointer-events: none/auto 控制点击穿透
+ * - -webkit-app-region: drag 实现窗口拖拽
+ * - backdrop-filter: blur() 毛玻璃效果
+ */
+
+/* ==================== 基础重置 ==================== */
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;  /* 透明背景，让 MPV 视频显示 */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  /* 关键：默认不响应点击，让点击穿透到 MPV */
+  pointer-events: none;
+  user-select: none;  /* 禁止文本选择 */
+}
+
+/* ==================== 标题栏 ==================== */
+
+/**
+ * 自定义标题栏
+ * - 固定在顶部
+ * - 渐变背景（上深下浅）
+ * - 支持窗口拖拽
+ */
+.title-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding-right: 10px;
+  -webkit-app-region: drag;  /* 允许拖拽窗口 */
+  z-index: 100;
+  pointer-events: auto;  /* 响应点击 */
+}
+
+/* 标题栏按钮 */
+.title-bar button {
+  -webkit-app-region: no-drag;  /* 按钮不参与拖拽 */
+  background: none;
+  border: none;
+  color: white;
+  padding: 8px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.title-bar button:hover {
+  opacity: 1;
+}
+
+/* ==================== 信息面板 ==================== */
+
+/**
+ * 媒体信息面板
+ * - 显示分辨率、编码、轨道数等
+ * - 毛玻璃效果
+ */
+.info-panel {
+  position: fixed;
+  top: 50px;
+  left: 16px;
+  background: rgba(20, 20, 25, 0.7);
+  backdrop-filter: blur(8px);  /* 毛玻璃效果 */
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 15px;
+  z-index: 150;
+  pointer-events: auto;
+  font-size: 16px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  gap: 24px;
+}
+
+.info-row span:first-child {
+  color: rgba(255,255,255,0.6);  /* 标签颜色较淡 */
+}
+
+.info-row span:last-child {
+  color: rgba(255,255,255,0.9);  /* 值颜色较亮 */
+  text-align: right;
+  min-width: 60px;
+}
+
+/* ==================== 加载提示 ==================== */
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;  /* 等同于 top/right/bottom/left: 0 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.85);
+  z-index: 200;
+  pointer-events: auto;  /* 阻止点击穿透 */
+}
+
+.loading-text {
+  color: white;
+  font-size: 18px;
+  padding: 20px 40px;
+  background: rgba(0,0,0,0.9);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 加载动画 - 旋转圆圈 */
+.loading-text::before {
+  content: '';
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255,255,255,0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ==================== 欢迎页 ==================== */
+
+.welcome {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* 渐变背景 */
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  color: white;
+  z-index: 50;
+  pointer-events: auto;
+}
+
+.welcome h1 {
+  font-size: 28px;
+  margin-bottom: 30px;
+  font-weight: 300;
+}
+
+.welcome-buttons {
+  display: flex;
+  gap: 16px;
+}
+
+/* 主按钮 - 渐变背景 */
+.welcome button {
+  padding: 14px 32px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.welcome button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+/* 次要按钮 - 透明背景 */
+.welcome button.secondary {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.3);
+}
+
+.welcome button.secondary:hover {
+  background: rgba(255,255,255,0.2);
+  box-shadow: none;
+}
+
+/* ==================== 控制栏 ==================== */
+
+/**
+ * 底部控制栏
+ * - 包含进度条、播放按钮、音量等
+ * - 鼠标移动时显示，3秒后自动隐藏
+ */
+.control-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 20px 16px;
+  /* 渐变背景（下深上浅） */
+  background: linear-gradient(to top, rgba(0,0,0,0.95), rgba(0,0,0,0.7) 60%, transparent);
+  z-index: 100;
+  
+  /* 默认隐藏 */
+  opacity: 0;
+  bottom: -20px;
+  transition: opacity 0.3s, bottom 0.3s;
+  pointer-events: none;
+}
+
+/* 显示状态 */
+.control-bar.visible {
+  opacity: 1;
+  bottom: 0;
+  pointer-events: auto;
+}
+
+/* 进度条 */
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 3px;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.progress-bar:hover {
+  height: 8px;  /* 悬停时变粗 */
+}
+
+/* 进度条填充 */
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 3px;
+  transition: width 0.1s;
+}
+
+/* 控件行 */
+.controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: white;
+}
+
+.controls-left, .controls-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 图标按钮 */
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.8);
+  padding: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  pointer-events: auto;
+}
+
+.icon-btn:hover:not(.disabled) {
+  background: rgba(255,255,255,0.15);
+  color: white;
+}
+
+/* 禁用状态 */
+.icon-btn.disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 播放按钮 - 稍大一些 */
+.icon-btn.play-btn {
+  background: rgba(255,255,255,0.1);
+  padding: 10px;
+}
+
+.icon-btn.play-btn:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+/* 时间显示 */
+.time {
+  font-size: 13px;
+  color: rgba(255,255,255,0.7);
+  margin-left: 12px;
+  font-variant-numeric: tabular-nums;  /* 等宽数字 */
+}
+
+/* 音量控制 */
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 音量滑块 */
+.volume-slider {
+  appearance: none;
+  width: 70px;
+  height: 4px;
+  background: rgba(255,255,255,0.3);
+  border-radius: 2px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* ==================== 菜单 ==================== */
+
+/**
+ * 菜单遮罩层
+ * 点击遮罩关闭菜单
+ */
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  z-index: 200;
+  pointer-events: auto;
+}
+
+/**
+ * 底部菜单面板
+ * - 显示字幕、音频、章节、标题列表
+ * - 毛玻璃效果
+ */
+.bottom-menu {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  width: 400px;
+  height: calc(100vh - 160px);
+  background: rgba(20, 20, 25, 0.7);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  overflow: hidden;
+  z-index: 201;
+  pointer-events: auto;
+  
+  /* 动画：从右侧滑入 */
+  opacity: 0;
+  transform: translateX(20px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bottom-menu.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* 菜单标签栏 */
+.menu-tabs {
+  display: flex;
+  background: rgba(255,255,255,0.03);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 12px 0;
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.6);
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  color: rgba(255,255,255,0.9);
+  background: rgba(255,255,255,0.1);
+}
+
+.tab-btn.active {
+  color: white;
+  background: rgba(102, 126, 234, 0.2);
+}
+
+/* 菜单内容区 */
+.menu-content {
+  height: calc(100% - 50px);
+  overflow-y: auto;
+}
+
+.menu-section {
+  padding: 8px 0;
+}
+
+/* 菜单项 */
+.menu-item {
+  padding: 15px 20px;
+  color: rgba(255,255,255,0.85);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s;
+  background: rgba(255,255,255,0.05);
+}
+
+.menu-item:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+/* 选中状态 */
+.menu-item.active {
+  background: rgba(102, 126, 234, 0.15);
+  color: #667eea;
+}
+
+.menu-item span:last-child {
+  color: rgba(255,255,255,0.5);
+  font-size: 12px;
+}
+
+/* 滚动条样式 */
+.menu-content::-webkit-scrollbar {
+  width: 2px;
+}
+
+.menu-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.menu-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 1px;
+}

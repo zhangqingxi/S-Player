@@ -1,0 +1,51 @@
+{
+  "name": "s-player",
+  "version": "1.0.0",
+  "description": "基于 MPV 的现代化视频播放器，支持蓝光、多音轨、多字幕",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "start": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\" -k",
+    "build": "vite build",
+    "pack": "vite build && electron-builder --win --dir",
+    "dist": "vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "lucide-react": "^0.400.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "concurrently": "^8.2.2",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.0.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.splayer.app",
+    "productName": "S-Player",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "mpv.exe"
+    ],
+    "extraResources": [
+      {
+        "from": "mpv.exe",
+        "to": "mpv.exe"
+      }
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "S-Player.exe"
+    }
+  }
+}
