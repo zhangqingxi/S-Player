@@ -1,0 +1,157 @@
+// ==================== MPV 完整参数列表 ====================
+
+// 窗口与界面
+--wid=<窗口ID>                  // 嵌入到指定窗口
+--no-border                     // 无边框
+--force-window=immediate        // 立即创建窗口
+
+// OSD与控制
+--no-osc                        // 禁用屏幕控制器
+--no-osd-bar                    // 禁用OSD进度条
+
+// 播放行为
+--keep-open=yes                 // 播放完毕保持打开
+
+// 硬件加速
+--hwdec=auto                    // 自动硬件解码
+
+// 字幕
+--sub-auto=fuzzy                // 模糊匹配外部字幕
+--sub-visibility=yes            // 显示字幕
+--slang=chi,zho,zh,...          // 字幕语言优先级
+
+// 音频
+--alang=chi,zho,zh,...          // 音频语言优先级
+--audio-spdif=ac3,dts,...       // 音频透传格式
+--audio-channels=auto           // 自动音频声道
+
+// 缓存与预加载
+--cache=yes                     // 启用缓存
+--demuxer-max-bytes=150M        // 最大缓存（动态调整）
+--demuxer-readahead-secs=20     // 预读秒数（动态调整）
+
+// HDR与色彩
+--target-trc=auto               // 自动色调响应曲线
+--tone-mapping=hable            // 色调映射算法
+--hdr-compute-peak=yes          // 计算HDR峰值
+--target-prim=auto              // 自动色域匹配
+
+// IPC通信
+--input-ipc-server=<管道路径>   // IPC管道路径
+
+/* ==================== 未启用参数（备选） ==================== */
+
+// -------------------- 视频输出 --------------------
+// --vo=gpu                     // 视频输出驱动（默认auto）
+// --gpu-api=d3d11              // GPU API（Windows推荐d3d11）
+// --gpu-context=d3d11          // GPU上下文
+// --fbo-format=rgb10_a2        // 帧缓冲格式（10bit色深）
+
+// -------------------- 硬件解码增强 --------------------
+// --hwdec=d3d11va              // 强制使用D3D11VA硬解
+// --hwdec=dxva2                // 强制使用DXVA2硬解
+// --hwdec=nvdec                // NVIDIA硬解
+// --hwdec-codecs=all           // 所有编解码器启用硬解
+
+// -------------------- 缩放与滤镜 --------------------
+// --scale=ewa_lanczossharp     // 放大算法（高质量，消耗GPU）
+// --cscale=ewa_lanczossharp    // 色度放大算法
+// --dscale=mitchell            // 缩小算法
+// --linear-downscaling=yes     // 线性缩小
+// --sigmoid-upscaling=yes      // Sigmoid放大（更平滑）
+// --correct-downscaling=yes    // 正确的缩小处理
+
+// -------------------- 去隔行 --------------------
+// --deinterlace=yes            // 自动去隔行
+// --deinterlace=no             // 禁用去隔行
+
+// -------------------- 字幕增强 --------------------
+// --sub-ass-override=yes       // 覆盖ASS字幕样式
+// --sub-font-size=45           // 字幕字体大小
+// --sub-color='#FFFFFF'      // 字幕颜色
+// --sub-border-size=2.5        // 字幕边框大小
+// --sub-shadow-offset=1        // 字幕阴影偏移
+// --embeddedfonts=yes          // 使用内嵌字体
+
+// -------------------- 音频增强 --------------------
+// --audio-device=auto          // 音频输出设备
+// --audio-exclusive=yes        // 独占音频设备
+// --audio-normalize-downmix=yes// 规范化降混音
+// --volume=100                 // 默认音量
+// --volume-max=150             // 最大音量
+
+// -------------------- 同步与延迟 --------------------
+// --video-sync=display-resample// 视频同步方式（平滑但可能卡顿）
+// --interpolation=yes          // 帧插值（运动补偿）
+// --tscale=oversample          // 时间缩放算法
+// --audio-delay=0              // 音频延迟（秒）
+// --video-delay=0              // 视频延迟（秒）
+
+// -------------------- 网络与流媒体 --------------------
+// --network-timeout=60         // 网络超时（秒）
+// --user-agent="Mozilla/5.0"   // HTTP User-Agent
+// --http-header-fields="..."   // 自定义HTTP头
+// --referrer="..."             // HTTP Referrer
+
+// -------------------- 截图 --------------------
+// --screenshot-format=png      // 截图格式（png/jpg）
+// --screenshot-png-compression=7 // PNG压缩级别
+// --screenshot-directory=~/    // 截图保存目录
+// --screenshot-template="%F-%P"// 截图文件名模板
+
+// -------------------- 日志与调试 --------------------
+// --msg-level=all=info         // 日志级别
+// --log-file=mpv.log           // 日志文件路径
+// --really-quiet               // 完全静默
+// --term-osd-bar               // 终端OSD进度条
+
+// -------------------- 播放列表 --------------------
+// --playlist-start=0           // 播放列表起始位置
+// --loop-file=inf              // 单文件循环
+// --loop-playlist=inf          // 播放列表循环
+// --shuffle                    // 随机播放
+
+// -------------------- 窗口行为 --------------------
+// --ontop                      // 窗口置顶
+// --no-keepaspect              // 不保持宽高比
+// --keepaspect-window          // 窗口保持宽高比
+// --geometry=50%:50%           // 窗口位置
+// --autofit=50%                // 窗口大小
+// --fullscreen                 // 全屏启动
+
+// -------------------- 性能优化 --------------------
+// --vd-lavc-threads=0          // 解码线程数（0=自动）
+// --ad-lavc-threads=0          // 音频解码线程数
+// --vd-lavc-dr=yes             // 直接渲染
+// --vd-lavc-fast               // 快速解码模式
+
+// -------------------- 蓝光/DVD特定 --------------------
+// --bluray-device=<路径>       // 蓝光设备路径
+// --dvd-device=<路径>          // DVD设备路径
+// --edition=<编号>             // 蓝光Edition编号
+// --chapters=<范围>            // 章节范围 (例：5-10)
+
+// -------------------- 实验性功能 --------------------
+// --drm-mode=overlay           // DRM模式（嵌入式系统）
+// --opengl-pbo                 // 使用PBO（Pixel Buffer Object）
+// --vulkan-swap-mode=fifo      // Vulkan交换模式
+
+/* ==================== 使用建议 ==================== */
+
+// 1. 高性能配置（牺牲质量）
+//    --hwdec=auto --scale=bilinear --no-cache
+
+// 2. 高质量配置（消耗GPU）
+//    --scale=ewa_lanczossharp --cscale=ewa_lanczossharp --sigmoid-upscaling=yes
+
+// 3. 低延迟配置（直播）
+//    --cache=no --untimed --video-sync=audio
+
+// 4. HDR显示器配置
+//    --target-trc=auto --target-prim=auto --tone-mapping=hable --hdr-compute-peak=yes
+
+// 5. SDR显示器播放HDR内容
+//    --target-trc=gamma2.2 --target-prim=bt.709 --tone-mapping=mobius
+
+/* ==================== 参考文档 ==================== */
+// MPV Manual: https://mpv.io/manual/stable/

@@ -43,9 +43,6 @@ contextBridge.exposeInMainWorld('api', {
   /** 打开文件选择对话框，返回选中的文件路径 */
   openFile: () => ipcRenderer.invoke('open-file'),
   
-  /** 打开文件夹选择对话框（用于蓝光文件夹） */
-  openFolder: () => ipcRenderer.invoke('open-folder'),
-  
   /** 播放指定路径的视频文件 */
   play: (path) => ipcRenderer.invoke('play', path),
   

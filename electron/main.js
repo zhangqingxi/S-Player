@@ -76,9 +76,16 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),  // 预加载脚本
       contextIsolation: true,   // 上下文隔离，安全必需
-      nodeIntegration: false    // 禁用 Node 集成，安全必需
+      nodeIntegration: false,   // 禁用 Node 集成，安全必需
+      enableRemoteModule: false // 禁用 remote 模块
     }
   });
+  
+  // 允许拖放文件到窗口
+  mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+  
+  // 禁用默认菜单
+  mainWindow.setMenuBarVisibility(false);
 
   // 根据环境加载不同的页面
   if (isDev) {
@@ -177,79 +184,149 @@ async function startMpv(filePath, titleEdition = null) {
 
   // ==================== MPV 启动参数 ====================
   const args = [
-    `--wid=${wid}`,                    // 嵌入到指定窗口
-    `--input-ipc-server=${IPC_PIPE}`,  // IPC 管道路径
+    `--wid=${wid}`,                     // 嵌入到指定窗口
+    `--input-ipc-server=${IPC_PIPE}`,   // IPC 管道路径
     '--no-border',                      // 无边框
     '--no-osc',                         // 禁用屏幕控制器
     '--no-osd-bar',                     // 禁用 OSD 进度条
     '--keep-open=yes',                  // 播放完毕保持打开
-    '--hwdec=auto',                     // 自动硬件解码
-    '--sub-auto=fuzzy',                 // 模糊匹配外部字幕
-    '--sub-visibility=yes',             // 显示字幕
-    '--alang=chi,zho,zh,cmn,chs,sc',   // 优先中文音频
-    '--slang=chi,zho,zh,cmn,chs,sc',   // 优先中文字幕
-    '--force-window=immediate',         // 立即创建窗口
-    '--cache=yes',                      // 启用缓存
-    '--demuxer-max-bytes=150M',         // 缓存大小
+    
+    // ==================== GPU 硬件解码（使用显卡替代CPU） ====================
+    '--hwdec=auto-safe',                // 自动选择安全的硬解模式
+    '--vo=gpu',                         // 使用GPU视频输出
+    '--gpu-api=auto',                   // 自动选择GPU API (d3d11/vulkan)
+    '--gpu-context=auto',               // 自动GPU上下文
+    '--hwdec-codecs=all',               // 所有编解码器启用硬解
+    
+    // ==================== 画质增强 ====================
+    '--scale=ewa_lanczossharp',         // 放大算法（高质量）
+    '--cscale=ewa_lanczossharp',        // 色度放大算法
+    '--dscale=mitchell',                // 缩小算法
+    '--correct-downscaling=yes',        // 正确的缩小处理
+    '--linear-downscaling=yes',         // 线性缩小
+    '--sigmoid-upscaling=yes',          // Sigmoid 放大（减少振铃）
+    '--deband=yes',                     // 去色带
+    '--deband-iterations=2',            // 去色带迭代次数
+    '--deband-threshold=48',            // 去色带阈值
+    '--deband-range=16',                // 去色带范围
+    '--deband-grain=48',                // 去色带颗粒
+    '--interpolation=yes',              // 帧插值（运动补偿）
+    '--video-sync=display-resample',    // 视频同步模式
+    '--tscale=oversample',              // 时间插值算法
+    
+    // ==================== 音频输出（Windows 使用 wasapi） ====================
+    '--ao=wasapi',                      // 使用 Windows 音频会话 API
+    '--audio-exclusive=no',             // 禁用独占模式
+    '--audio-fallback-to-null=yes',     // 音频失败时使用空输出（不阻塞播放）
+    
+    '--sub-auto=fuzzy',                             // 模糊匹配外部字幕
+    '--sub-visibility=yes',                         // 显示字幕
+    
+    // ==================== 语言优选（中文优先） ====================
+    // 音频语言优先级：简体中文、繁体中文、粤语、普通话、英语、日语
+    '--alang=chi,zho,zh,cmn,chs,cht,sc,tc,cn,tw,yue,cantonese,mandarin,chinese,eng,en,jpn,ja',
+    // 字幕语言优先级：简体中文、繁体中文、中文、英语
+    '--slang=chi,zho,zh,cmn,chs,cht,sc,tc,cn,tw,chinese,eng,en',
+    
+    // ==================== 窗口与缓存 ====================
+    '--force-window=immediate',                     // 立即创建窗口
+    '--cache=yes',                                  // 启用缓存
+    
+    // ==================== 动态预加载配置 ====================
+    // 注意：预加载大小会根据文件大小动态调整（见下方代码）
+    '--demuxer-max-bytes=150M',                     // 最大缓存 150MB（默认值，会动态调整）
+    '--demuxer-readahead-secs=20',                  // 预读20秒
+    
+    // ==================== 音频配置 ====================
+    // 注释掉音频透传，先测试基本播放
+    // '--audio-spdif=ac3,dts,eac3,truehd,dts-hd',     // 支持透传的音频格式
+    '--audio-channels=auto',                        // 自动音频声道配置
+    
+    // ==================== HDR 和杜比视界（需HDR显示器） ====================
+    '--target-trc=auto',                            // 自动色调响应曲线
+    '--tone-mapping=hable',                         // Hable色调映射算法（适合HDR到SDR）
+    '--hdr-compute-peak=yes',                       // 动态计算HDR峰值亮度
+    '--target-prim=auto',                           // 自动色域匹配
   ];
-
-  // ==================== 光盘类型检测 ====================
+  
+  // ==================== 文件类型检测 ====================
   const lower = filePath.toLowerCase();
   const isIso = lower.endsWith('.iso');
   
-  // 检测文件夹结构
-  const isBlurayFolder = fs.existsSync(path.join(filePath, 'BDMV')) || lower.includes('bdmv');
-  const isDvdFolder = fs.existsSync(path.join(filePath, 'VIDEO_TS')) || lower.includes('video_ts');
-  
-  // ISO 文件通过文件大小判断类型
-  // DVD: 单层 4.7GB, 双层 8.5GB (最大约 9GB)
-  // 蓝光: 单层 25GB, 双层 50GB (最小约 15GB)
-  let isBlurayIso = false;
-  let isDvdIso = false;
-  if (isIso) {
+  // ==================== 缓冲优化（防卡顿） ====================
+  // 检测文件大小，为大文件和网络文件增加预加载缓存
+  if (!isIso) {
     try {
       const stats = fs.statSync(filePath);
-      const sizeGB = stats.size / (1024 * 1024 * 1024);
-      // 大于 10GB 认为是蓝光，否则是 DVD
-      isBlurayIso = sizeGB > 10;
-      isDvdIso = sizeGB <= 10;
+      const fileSizeGB = stats.size / (1024 * 1024 * 1024);
+      
+      if (fileSizeGB > 10) {
+        // 超大文件（>10GB）：增强缓冲
+        args.push('--demuxer-max-bytes=500M', '--demuxer-readahead-secs=60');
+        console.log(`超大文件 (${fileSizeGB.toFixed(1)}GB)：500MB缓存，60秒预读`);
+      } else if (fileSizeGB > 5) {
+        // 大文件（>5GB）：中等缓冲
+        args.push('--demuxer-max-bytes=300M', '--demuxer-readahead-secs=40');
+        console.log(`大文件 (${fileSizeGB.toFixed(1)}GB)：300MB缓存，40秒预读`);
+      } else {
+        // 普通文件：标准缓冲
+        args.push('--demuxer-max-bytes=150M', '--demuxer-readahead-secs=20');
+        console.log(`普通文件 (${fileSizeGB.toFixed(2)}GB)：150MB缓存，20秒预读`);
+      }
     } catch (e) {
-      // 无法获取文件大小，默认尝试蓝光
-      isBlurayIso = true;
+      // 无法获取文件大小，使用安全的默认值
+      args.push('--demuxer-max-bytes=200M', '--demuxer-readahead-secs=30');
+      console.log('无法获取文件大小，使用默认缓冲配置');
     }
   }
   
-  if (isBlurayFolder || isBlurayIso) {
-    // ==================== 蓝光模式 ====================
-    if (titleEdition === null) {
-      blurayTitles = [];
-    }
-    currentBlurayDevice = filePath;
-    
-    if (isIso) {
+  // 通用缓冲优化参数（适用于所有文件）
+  args.push(
+    '--cache-pause=yes',                // 缓冲不足时暂停播放
+    '--cache-pause-wait=3',             // 暂停后等待3秒缓冲
+    '--cache-pause-initial=yes',        // 初始缓冲时暂停
+    '--demuxer-seekable-cache=yes'      // 允许在缓存范围内seek
+  );
+  
+  if (isIso) {
+    // ISO 文件通过大小判断是蓝光还是DVD
+    try {
+      const stats = fs.statSync(filePath);
+      const sizeGB = stats.size / (1024 * 1024 * 1024);
+      
+      if (sizeGB > 10) {
+        // 蓝光ISO（>10GB）
+        console.log(`检测到蓝光ISO (${sizeGB.toFixed(1)}GB)`);
+        // 只在初次打开时清空标题列表，切换标题时保留
+        if (titleEdition === null) {
+          blurayTitles = [];
+        }
+        currentBlurayDevice = filePath;
+        args.push(`--bluray-device=${filePath}`);
+        if (titleEdition !== null) {
+          args.push(`--edition=${titleEdition}`);
+        }
+        args.push('bd://longest');
+      } else {
+        // DVD ISO
+        console.log(`检测到DVD ISO (${sizeGB.toFixed(1)}GB)`);
+        currentBlurayDevice = null;
+        args.push(`--dvd-device=${filePath}`);
+        args.push('dvd://longest');
+      }
+    } catch (e) {
+      // 无法判断，当作蓝光处理
+      console.log('无法获取ISO大小，默认蓝光模式');
+      currentBlurayDevice = filePath;
       args.push(`--bluray-device=${filePath}`);
-    } else {
-      const root = lower.includes('bdmv') ? path.dirname(filePath) : filePath;
-      args.push(`--bluray-device=${root}`);
+      if (titleEdition !== null) {
+        args.push(`--edition=${titleEdition}`);
+      }
+      args.push('bd://longest');
     }
-    
-    if (titleEdition !== null) {
-      args.push(`--edition=${titleEdition}`);
-    }
-    args.push('bd://longest');
-  } else if (isDvdFolder || isDvdIso) {
-    // ==================== DVD 模式 ====================
-    currentBlurayDevice = null;
-    
-    if (isIso) {
-      args.push(`--dvd-device=${filePath}`);
-    } else {
-      const root = lower.includes('video_ts') ? path.dirname(filePath) : filePath;
-      args.push(`--dvd-device=${root}`);
-    }
-    args.push('dvd://longest');
   } else {
-    // ==================== 普通文件模式 ====================
+    // 普通视频文件
+    console.log(`播放文件: ${filePath}`);
     currentBlurayDevice = null;
     args.push(filePath);
   }
@@ -439,21 +516,12 @@ function setupIpc() {
   });
 
   // 注册属性监听
-  // observe_property 会在属性变化时自动通知
   const props = [
-    'time-pos',         // 播放位置
-    'duration',         // 总时长
-    'pause',            // 暂停状态
-    'volume',           // 音量
-    'mute',             // 静音状态
-    'track-list',       // 轨道列表
-    'chapter-list',     // 章节列表
-    'chapter',          // 当前章节
-    'video-params',     // 视频参数
-    'audio-codec-name', // 音频编码
-    'video-codec',      // 视频编码
-    'aid',              // 当前音频轨道
-    'sid'               // 当前字幕轨道
+    'time-pos', 'duration', 'pause', 'volume', 'mute',
+    'track-list', 'chapter-list', 'chapter',
+    'video-params', 'audio-codec-name', 'video-codec',
+    'video-bitrate', 'audio-bitrate', 'aid', 'sid',
+    'paused-for-cache', 'cache-buffering-state'
   ];
   props.forEach((p, i) => sendCmd(['observe_property', i + 1, p]));
 }
@@ -481,14 +549,6 @@ ipcMain.handle('open-file', async () => {
       name: 'Videos', 
       extensions: ['mkv', 'mp4', 'avi', 'mov', 'iso', 'm2ts'] 
     }]
-  });
-  return canceled ? null : filePaths[0];
-});
-
-/** 打开文件夹对话框 */
-ipcMain.handle('open-folder', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory']
   });
   return canceled ? null : filePaths[0];
 });
