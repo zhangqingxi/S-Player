@@ -18,7 +18,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Play, Pause, SkipBack, SkipForward, Square, 
   Volume2, VolumeX, Maximize, Minus, X, 
-  FolderOpen, Info, List 
+  FolderOpen, Info, Music, Subtitles, BookOpen, Film
 } from 'lucide-react';
 
 // ==================== 工具函数 ====================
@@ -96,8 +96,8 @@ const getVideoCodec = (codec) => {
  * @returns {string} 格式化后的声道描述
  * 
  * @example
- * getChannels(2) // 返回 '立体声'
- * getChannels(6) // 返回 '5.1环绕'
+ * getChannels(2) // 返回 '2.0'
+ * getChannels(6) // 返回 '5.1'
  */
 const getChannels = (channels) => {
   if (!channels || channels === 'undefined') return '';
@@ -109,9 +109,9 @@ const getChannels = (channels) => {
     else return channels;
   }
   
-  // 数字映射
-  const map = { 1: '单声道', 2: '立体声', 6: '5.1环绕', 8: '7.1环绕' };
-  return map[channels] || `${channels}声道`;
+  // 数字映射为声道格式
+  const map = { 1: '1.0', 2: '2.0', 6: '5.1', 8: '7.1' };
+  return map[channels] || `${channels}.0`;
 };
 
 /**
@@ -201,9 +201,8 @@ function App() {
   
   // UI 状态
   const [showControls, setShowControls] = useState(true);  // 显示控制栏
-  const [showInfo, setShowInfo] = useState(false);         // 显示信息面板
-  const [showMenu, setShowMenu] = useState(false);         // 显示菜单
-  const [activeTab, setActiveTab] = useState('chapter');   // 菜单当前标签
+  const [activePopup, setActivePopup] = useState(null);    // 当前打开的弹出菜单: 'audio' | 'sub' | 'chapter' | 'title' | null
+  const [showInfo, setShowInfo] = useState(false);         // INFO 是独立的，不受其他菜单影响
   
   // 媒体信息
   const [videoParams, setVideoParams] = useState(null);    // 视频参数
@@ -239,6 +238,15 @@ function App() {
   const hideTimer = useRef(null);              // 控制栏隐藏定时器
   const lastPositionRef = useRef(0);           // 上一次播放位置（用于检测进度变化）
   const isLoadingRef = useRef(false);          // Loading 状态的 ref（用于事件处理器访问最新值）
+  
+  // 按钮 refs（用于计算弹出菜单位置）
+  const audioButtonRef = useRef(null);
+  const subButtonRef = useRef(null);
+  const chapterButtonRef = useRef(null);
+  const titleButtonRef = useRef(null);
+  
+  // 弹出菜单位置
+  const [popupPosition, setPopupPosition] = useState({ right: '50%' });
 
   // ==================== 初始化 ====================
   
@@ -390,8 +398,9 @@ function App() {
       setPosition(0);
       setDuration(0);
       setCurrentTitle(null);
-      setShowInfo(false);
       setIsBuffering(false);
+      setActivePopup(null);  // 关闭所有弹出菜单
+      setShowInfo(false);    // 关闭 INFO
     };
 
     // 蓝光标题列表更新
@@ -450,16 +459,16 @@ function App() {
     };
   }, []); // 空依赖数组，只在挂载时执行一次
 
-  // 控制栏隐藏时关闭菜单
+  // 控制栏隐藏时关闭弹出菜单（但保留 INFO）
   useEffect(() => {
-    if (!showControls && showMenu) {
-      setShowMenu(false);
+    if (!showControls && activePopup) {
+      setActivePopup(null);
     }
-  }, [showControls, showMenu]);
+  }, [showControls, activePopup]);
   
-  // 菜单打开时保持控制栏显示
+  // 弹出菜单打开时保持控制栏显示
   useEffect(() => {
-    if (showMenu) {
+    if (activePopup) {
       setShowControls(true);
       // 清除自动隐藏定时器
       if (hideTimer.current) {
@@ -467,7 +476,7 @@ function App() {
         hideTimer.current = null;
       }
     }
-  }, [showMenu]);
+  }, [activePopup]);
   
   // 同步 isLoading 到 ref（用于事件处理器访问最新值）
   useEffect(() => {
@@ -483,12 +492,28 @@ function App() {
   const extractTitleFromFileName = (filePath) => {
     const fileName = filePath.split(/[\\/]/).pop();
     
-    // 提取年份（4位数字）
-    const yearMatch = fileName.match(/\b(19\d{2}|20\d{2})\b/);
+    // 🔥 处理合集：检测 + 或 2in1, 3in1 等标记
+    // 例如: "Movie1.1976+Movie2.1980.iso" 或 "Movie1+Movie2 2in1.iso"
+    let processedFileName = fileName;
+    
+    // 检测合集标记
+    const collectionMatch = fileName.match(/^([^+]+)\+/);  // 匹配第一个 + 之前的内容
+    const multiMatch = fileName.match(/(\d+)in1/i);  // 匹配 2in1, 3in1 等
+    
+    if (collectionMatch || multiMatch) {
+      // 这是一个合集，只提取第一部电影（+ 之前的部分）
+      if (collectionMatch) {
+        processedFileName = collectionMatch[1];
+        console.log('检测到合集（+分隔），提取第一部:', processedFileName);
+      }
+    }
+    
+    // 提取年份（4位数字，从处理后的文件名中提取第一个年份）
+    const yearMatch = processedFileName.match(/\b(19\d{2}|20\d{2})\b/);
     const year = yearMatch ? yearMatch[1] : null;
     
     // 移除扩展名和常见标记
-    let title = fileName
+    let title = processedFileName
       .replace(/\.[^.]+$/, '')  // 移除扩展名
       .replace(/\[(.*?)\]/g, '')  // 移除方括号内容
       .replace(/@[\w]+/g, '')  // 移除@组名如@HDSky
@@ -499,6 +524,8 @@ function App() {
       .replace(/(x264|x265|HEVC|AVC|H\.264|H\.265|10bit)/gi, '')
       .replace(/(AAC|DTS|TrueHD|Atmos|FLAC|DD|AC3|EAC3|LPCM)/gi, '')
       .replace(/(DIY|Repack|Proper|EXTENDED|Directors\.Cut)/gi, '')
+      .replace(/\b(GBR|USA|FRA|JPN|CHN|KOR|HKG|TWN)\b/gi, '')  // 移除国家代码
+      .replace(/(\d+)in1/gi, '')  // 移除 2in1, 3in1 等标记
       .replace(/[._-]+/g, ' ')  // 替换分隔符为空格
       .replace(/\s+/g, ' ')  // 合并多个空格
       .trim();
@@ -671,7 +698,7 @@ function App() {
     setIsLoading(true);
     setCurrentAudio(id);
     window.api.cmd(['set_property', 'aid', id]);
-    setShowMenu(false);
+    setActivePopup(null);  // 关闭弹出菜单
   }, [currentAudio]);
 
   /** 手动切换字幕 */
@@ -681,7 +708,7 @@ function App() {
     setIsLoading(true);
     setCurrentSub(id);
     window.api.cmd(['set_property', 'sid', id]);
-    setShowMenu(false);
+    setActivePopup(null);  // 关闭弹出菜单
   }, [currentSub]);
 
   /** 跳转到章节 */
@@ -689,7 +716,7 @@ function App() {
     setLoadingText('正在跳转章节...');
     setIsLoading(true);
     window.api.cmd(['seek', time, 'absolute']);
-    setShowMenu(false);
+    setActivePopup(null);  // 关闭弹出菜单
   }, []);
 
   /** 切换蓝光标题 */
@@ -707,7 +734,7 @@ function App() {
     lastPositionRef.current = 0;
     
     window.api.switchTitle(edition);
-    setShowMenu(false);
+    setActivePopup(null);  // 关闭弹出菜单
   }, []);
 
   // ==================== 工具函数 ====================
@@ -748,108 +775,53 @@ function App() {
     if (!track) return '无';
     return `${track.type || 'SUB'} - ${track.lang || '未知'}`;
   };
-  
-  // 获取当前章节详情
-  const getCurrentChapterInfo = () => {
-    if (chapters.length === 0) return '无';
-    const ch = chapters[currentChapter];
-    return ch ? `${currentChapter + 1}/${chapters.length} - ${ch.title || '章节 ' + (currentChapter + 1)}` : '无';
-  };
-  
-  /** 媒体信息面板 */
-  const InfoPanel = () => (
-    <div className="info-panel">
-      {/* TMDB 信息 */}
-      {tmdbInfo && (
-        <div className="info-section">
-          {/* 左右布局：左侧海报，右侧信息 */}
-          <div className="info-header">
-            {/* 左侧：海报图片 */}
-            {tmdbInfo.posterUrl && (
-              <div className="info-poster">
-                <img src={tmdbInfo.posterUrl} alt={tmdbInfo.title} />
-              </div>
-            )}
-            
-            {/* 右侧：标题、年份、评分、演员 */}
-            <div className="info-details">
-              <div className="info-title">{tmdbInfo.title}</div>
-              {tmdbInfo.originalTitle !== tmdbInfo.title && (
-                <div className="info-subtitle">{tmdbInfo.originalTitle}</div>
-              )}
-              <div className="info-meta">
-                {tmdbInfo.releaseDate?.split('-')[0]} · 评分 {tmdbInfo.rating?.toFixed(1)}
-              </div>
-              {tmdbInfo.cast.length > 0 && (
-                <div className="info-cast">
-                  {tmdbInfo.cast.join(' / ')}
-                </div>
-              )}
-            </div>
-          </div>
-          
-          {/* 简介 - 独立一行，支持换行 */}
-          <div className="info-overview">
-            {tmdbInfo.overview}
-          </div>
-        </div>
-      )}
-      
-      {!tmdbInfo && currentFileName && (
-        <div className="info-section">
-          <div className="info-title">{currentFileName}</div>
-        </div>
-      )}
-      
-      <div className="info-divider" />
-      
-      {/* 技术信息 */}
-      <div className="info-row">
-        <span>分辨率</span>
-        <span>{videoParams?.w || 0}x{videoParams?.h || 0}</span>
-      </div>
-      <div className="info-row">
-        <span>视频</span>
-        <span>{getVideoCodec(videoCodec)}</span>
-      </div>
-      <div className="info-row">
-        <span>音频</span>
-        <span>{getCurrentAudioTrack()}</span>
-      </div>
-      <div className="info-row">
-        <span>字幕</span>
-        <span>{getCurrentSubTrack()}</span>
-      </div>
-      <div className="info-row">
-        <span>码率</span>
-        <span>{videoBitrate > 0 ? `${(videoBitrate / 1000).toFixed(2)} Mbps` : '计算中...'}</span>
-      </div>
-    </div>
-  );
 
   // 是否显示首页
   const showHome = pageState === 'home';
   
-  // 检查菜单是否有内容
-  const hasMenuContent = subTracks.length > 0 || audioTracks.length > 0 || 
-                         chapters.length > 0 || blurayTitles.length > 0;
-  
-  // 获取第一个有内容的标签
-  const getFirstAvailableTab = useCallback(() => {
-    if (subTracks.length > 0) return 'sub';
-    if (audioTracks.length > 0) return 'audio';
-    if (chapters.length > 0) return 'chapter';
-    if (blurayTitles.length > 0) return 'title';
-    return 'chapter';
-  }, [subTracks.length, audioTracks.length, chapters.length, blurayTitles.length]);
-  
-  // 打开菜单时自动选中第一个有内容的标签
-  const handleToggleMenu = useCallback(() => {
-    if (!showMenu && hasMenuContent) {
-      setActiveTab(getFirstAvailableTab());
+  /**
+   * 切换弹出菜单
+   * @param {string} type - 菜单类型: 'audio' | 'sub' | 'chapter' | 'title' | 'info'
+   * 
+   * INFO 是独立的，不受其他菜单影响
+   * 其他菜单（音频、字幕、章节、标题）互斥
+   */
+  const togglePopup = useCallback((type) => {
+    // INFO 是独立的，不受其他菜单影响
+    if (type === 'info') {
+      setShowInfo(!showInfo);
+      return;
     }
-    setShowMenu(!showMenu);
-  }, [showMenu, hasMenuContent, getFirstAvailableTab]);
+    
+    // 其他菜单（音频、字幕、章节、标题）互斥
+    if (activePopup === type) {
+      setActivePopup(null);
+      return;
+    }
+    
+    // 计算按钮位置
+    let buttonRef = null;
+    if (type === 'audio') buttonRef = audioButtonRef;
+    else if (type === 'sub') buttonRef = subButtonRef;
+    else if (type === 'chapter') buttonRef = chapterButtonRef;
+    else if (type === 'title') buttonRef = titleButtonRef;
+    
+    if (buttonRef?.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const buttonCenter = rect.left + rect.width / 2;
+      const menuWidth = 135;  // 更新菜单宽度
+      const rightPosition = window.innerWidth - buttonCenter - menuWidth / 2;
+      setPopupPosition({ 
+        right: `${rightPosition}px`, 
+        left: 'auto',
+        top: 'auto',
+        bottom: '80px',
+        transform: 'none'
+      });
+    }
+    
+    setActivePopup(type);
+  }, [activePopup, showInfo]);
 
   // ==================== 渲染 ====================
   
@@ -863,10 +835,6 @@ function App() {
         <button onClick={() => window.api.close()}><X size={16} /></button>
       </div>
 
-      {/* ========== 信息面板 ========== */}
-      {/* 显示视频分辨率、编码等信息 */}
-      {!showHome && showInfo && <InfoPanel />}
-      
       {/* ========== 首页 ========== */}
       {/* 显示打开文件/文件夹按钮 */}
       {showHome && (
@@ -922,120 +890,270 @@ function App() {
         </div>
       )}
 
-      {/* ========== 菜单面板 ========== */}
-      {/* 字幕、音频、章节、标题切换菜单，只在有内容时显示 */}
-      {showMenu && showControls && hasMenuContent && (
-        <div className="menu-overlay" onClick={() => setShowMenu(false)}>
-          <div 
-            className={`bottom-menu ${showMenu ? 'visible' : ''}`} 
-            onClick={e => e.stopPropagation()}
-          >
-            {/* 左右布局容器 */}
-            <div className="menu-layout">
-              {/* 左侧标签栏 */}
-              <div className="menu-tabs">
-                {subTracks.length > 0 && (
-                  <button 
-                    className={`tab-btn ${activeTab === 'sub' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('sub')}
-                  >
-                    字幕
-                  </button>
+      {/* ========== 弹出菜单 ========== */}
+      {/* 音频弹出菜单 */}
+      {activePopup === 'audio' && audioTracks.length > 0 && (
+        <div 
+          className={`popup-menu ${activePopup === 'audio' ? 'visible' : ''}`}
+          style={popupPosition}
+        >
+          {audioTracks.map((audio, i) => (
+            <div 
+              key={i} 
+              className={`popup-menu-item ${audio.id === currentAudio ? 'active' : ''}`}
+              onClick={() => setAudioTrack(audio.id)}
+            >
+              <span className="popup-menu-item-left">
+                {audio.codec || '音频'} {audio.channels}
+              </span>
+              <span className="popup-menu-item-right">
+                {audio.lang || '未知'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* 字幕弹出菜单 */}
+      {activePopup === 'sub' && subTracks.length > 0 && (
+        <div 
+          className={`popup-menu ${activePopup === 'sub' ? 'visible' : ''}`}
+          style={popupPosition}
+        >
+          {subTracks.map((sub, i) => (
+            <div 
+              key={i} 
+              className={`popup-menu-item ${sub.id === currentSub ? 'active' : ''}`}
+              onClick={() => setSubTrack(sub.id)}
+            >
+              <span className="popup-menu-item-left">
+                {sub.type || '字幕'}
+              </span>
+              <span className="popup-menu-item-right">
+                {sub.lang || '未知'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* 章节弹出菜单 */}
+      {activePopup === 'chapter' && chapters.length > 0 && (
+        <div 
+          className={`popup-menu ${activePopup === 'chapter' ? 'visible' : ''}`}
+          style={popupPosition}
+        >
+          {chapters.map((chapter, i) => (
+            <div 
+              key={i} 
+              className={`popup-menu-item ${i === currentChapter ? 'active' : ''}`}
+              onClick={() => seekToChapter(chapter.time)}
+            >
+              <span className="popup-menu-item-left">
+                章节 {i + 1}
+              </span>
+              <span className="popup-menu-item-right">
+                {formatTime(chapter.time)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* 标题弹出菜单 */}
+      {activePopup === 'title' && blurayTitles.length > 0 && (
+        <div 
+          className={`popup-menu ${activePopup === 'title' ? 'visible' : ''}`}
+          style={popupPosition}
+        >
+          {blurayTitles.map((title, i) => (
+            <div 
+              key={i} 
+              className={`popup-menu-item ${title.edition === currentTitle ? 'active' : ''}`}
+              onClick={() => switchTitle(title.edition)}
+            >
+              <span className="popup-menu-item-left">
+                标题 {title.displayIndex}{title.isMain ? ' ★' : ''}
+              </span>
+              <span className="popup-menu-item-right">
+                {formatTime(title.durationSeconds || 0)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* INFO 弹出菜单 - 显示完整影片信息 */}
+      {showInfo && (
+        <div 
+          className="popup-menu visible"
+          style={{ 
+            left: '20px',
+            right: 'auto',
+            top: '50px',
+            bottom: 'auto',
+            transform: 'none',
+            width: '400px', 
+            height: '470px',
+            cursor: 'default' 
+          }}
+        >
+          {/* 上部分：TMDB 影片信息 */}
+          {tmdbInfo && (
+            <>
+              {/* 左右布局：左侧封面图 + 右侧4行内容 */}
+              <div style={{ 
+                padding: '12px', 
+                cursor: 'default',
+                pointerEvents: 'none',
+                display: 'flex',
+                gap: '12px'
+              }}>
+                {/* 左侧：封面图 */}
+                {tmdbInfo.posterUrl && (
+                  <div style={{
+                    flexShrink: 0,
+                    height: '120px',
+                    width: 'auto',
+                    borderRadius: '4px',
+                    overflow: 'hidden',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
+                  }}>
+                    <img 
+                      src={tmdbInfo.posterUrl} 
+                      alt={tmdbInfo.title}
+                      style={{
+                        height: '100%',
+                        width: 'auto',
+                        display: 'block',
+                        objectFit: 'cover'
+                      }}
+                    />
+                  </div>
                 )}
-                {audioTracks.length > 0 && (
-                  <button 
-                    className={`tab-btn ${activeTab === 'audio' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('audio')}
-                  >
-                    音频
-                  </button>
-                )}
-                {chapters.length > 0 && (
-                  <button 
-                    className={`tab-btn ${activeTab === 'chapter' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('chapter')}
-                  >
-                    章节
-                  </button>
-                )}
-                {blurayTitles.length > 0 && (
-                  <button 
-                    className={`tab-btn ${activeTab === 'title' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('title')}
-                  >
-                    标题
-                  </button>
-                )}
+                
+                {/* 右侧：4行内容（平分120px高度） */}
+                <div style={{ 
+                  flex: 1, 
+                  minWidth: 0,
+                  height: '120px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
+                }}>
+                  {/* 第1行：标题 */}
+                  <div style={{ 
+                    fontSize: '12px', 
+                    fontWeight: '700', 
+                    color: 'white', 
+                    lineHeight: '1.3',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {tmdbInfo.title}
+                  </div>
+                  
+                  {/* 第2行：原标题 */}
+                  {tmdbInfo.originalTitle !== tmdbInfo.title && (
+                    <div style={{ 
+                      fontSize: '12px', 
+                      color: 'rgba(255,255,255,0.5)', 
+                      lineHeight: '1.3',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {tmdbInfo.originalTitle}
+                    </div>
+                  )}
+                  
+                  {/* 第3行：年份和评分 */}
+                  <div style={{ 
+                    fontSize: '12px', 
+                    color: 'rgba(255,255,255,0.7)', 
+                    lineHeight: '1.3'
+                  }}>
+                    {tmdbInfo.releaseDate?.split('-')[0]} · 评分 {tmdbInfo.rating?.toFixed(1)}
+                  </div>
+                  
+                  {/* 第4行：演员 */}
+                  {tmdbInfo.cast.length > 0 && (
+                    <div style={{ 
+                      fontSize: '12px', 
+                      color: 'rgba(255,255,255,0.6)', 
+                      lineHeight: '1.4',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical'
+                    }}>
+                      {tmdbInfo.cast.join(' / ')}
+                    </div>
+                  )}
+                </div>
               </div>
               
-              {/* 右侧内容区 */}
-              <div className="menu-content">
-              {/* 章节列表 */}
-              {activeTab === 'chapter' && chapters.length > 0 && (
-                <div className="menu-section">
-                  {chapters.map((chapter, i) => (
-                    <div 
-                      key={i} 
-                      className={`menu-item ${i === currentChapter ? 'active' : ''}`}
-                      onClick={() => seekToChapter(chapter.time)}
-                    >
-                      <span>章节 {i + 1}</span>
-                      <span>{formatTime(chapter.time)}</span>
-                    </div>
-                  ))}
+              {/* 下方：简介（独立一行，填满剩余空间，可滚动，隐藏滚动条） */}
+              <div style={{ 
+                padding: '0 12px 12px 12px',
+                cursor: 'default'
+              }}>
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: 'rgba(255,255,255,0.7)', 
+                  lineHeight: '1.6',
+                  height: '105px',
+                  overflowY: 'auto',
+                  pointerEvents: 'auto',
+                  scrollbarWidth: 'none',
+                  msOverflowStyle: 'none'
+                }}
+                className="info-overview-scroll"
+                >
+                  {tmdbInfo.overview}
                 </div>
-              )}
-              
-              {/* 蓝光标题列表 */}
-              {activeTab === 'title' && blurayTitles.length > 0 && (
-                <div className="menu-section">
-                  {blurayTitles.map((title, i) => (
-                    <div 
-                      key={i} 
-                      className={`menu-item ${title.edition === currentTitle ? 'active' : ''}`}
-                      onClick={() => switchTitle(title.edition)}
-                    >
-                      <span>标题 {title.displayIndex}{title.isMain ? ' ★' : ''}</span>
-                      <span>{title.duration || '0:00'}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              {/* 字幕列表 */}
-              {activeTab === 'sub' && subTracks.length > 0 && (
-                <div className="menu-section">
-                  {subTracks.map((sub, i) => (
-                    <div 
-                      key={i} 
-                      className={`menu-item ${sub.id === currentSub ? 'active' : ''}`}
-                      onClick={() => setSubTrack(sub.id)}
-                    >
-                      <span>{sub.type || '字幕'}</span>
-                      <span>{sub.title || sub.lang || '未知'}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              {/* 音轨列表 */}
-              {activeTab === 'audio' && audioTracks.length > 0 && (
-                <div className="menu-section">
-                  {audioTracks.map((audio, i) => (
-                    <div 
-                      key={i} 
-                      className={`menu-item ${audio.id === currentAudio ? 'active' : ''}`}
-                      onClick={() => setAudioTrack(audio.id)}
-                    >
-                      <span>{audio.codec || '音频'} {audio.channels}</span>
-                      <span>{audio.lang || '未知'}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              </div>
+            </>
+          )}
+          
+          {/* 如果没有 TMDB 信息，显示文件名 */}
+          {!tmdbInfo && currentFileName && (
+            <div style={{ 
+              padding: '12px', 
+              borderBottom: '1px solid rgba(255,255,255,0.15)',
+              cursor: 'default',
+              pointerEvents: 'none'
+            }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: 'white' }}>
+                {currentFileName}
+              </div>
             </div>
-            {/* menu-layout 关闭 */}
-            </div>
+          )}
+          
+          {/* 下部分：技术信息 */}
+          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>分辨率</span>
+            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{videoParams?.w || 0}x{videoParams?.h || 0}</span>
+          </div>
+          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>视频</span>
+            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getVideoCodec(videoCodec)}</span>
+          </div>
+          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>音频</span>
+            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getCurrentAudioTrack()}</span>
+          </div>
+          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>字幕</span>
+            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getCurrentSubTrack()}</span>
+          </div>
+          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>码率</span>
+            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>
+              {videoBitrate > 0 ? `${(videoBitrate / 1000).toFixed(2)} Mbps` : '计算中...'}
+            </span>
           </div>
         </div>
       )}
@@ -1092,17 +1210,55 @@ function App() {
                 />
               </div>
               
-              {/* 菜单按钮 - 没有内容时禁用 */}
-              <button 
-                className={`icon-btn ${!hasMenuContent ? 'disabled' : ''}`} 
-                onClick={handleToggleMenu}
-                disabled={!hasMenuContent}
-              >
-                <List size={20} />
-              </button>
+              {/* 音频按钮 */}
+              {audioTracks.length > 0 && (
+                <button 
+                  ref={audioButtonRef}
+                  className={`icon-btn ${activePopup === 'audio' ? 'active' : ''}`}
+                  onClick={() => togglePopup('audio')}
+                >
+                  <Music size={20} />
+                </button>
+              )}
+              
+              {/* 字幕按钮 */}
+              {subTracks.length > 0 && (
+                <button 
+                  ref={subButtonRef}
+                  className={`icon-btn ${activePopup === 'sub' ? 'active' : ''}`}
+                  onClick={() => togglePopup('sub')}
+                >
+                  <Subtitles size={20} />
+                </button>
+              )}
+              
+              {/* 章节按钮 */}
+              {chapters.length > 0 && (
+                <button 
+                  ref={chapterButtonRef}
+                  className={`icon-btn ${activePopup === 'chapter' ? 'active' : ''}`}
+                  onClick={() => togglePopup('chapter')}
+                >
+                  <BookOpen size={20} />
+                </button>
+              )}
+              
+              {/* 标题按钮 */}
+              {blurayTitles.length > 0 && (
+                <button 
+                  ref={titleButtonRef}
+                  className={`icon-btn ${activePopup === 'title' ? 'active' : ''}`}
+                  onClick={() => togglePopup('title')}
+                >
+                  <Film size={20} />
+                </button>
+              )}
               
               {/* 信息按钮 */}
-              <button className="icon-btn" onClick={() => setShowInfo(!showInfo)}>
+              <button 
+                className={`icon-btn ${showInfo ? 'active' : ''}`}
+                onClick={() => togglePopup('info')}
+              >
                 <Info size={20} />
               </button>
             </div>

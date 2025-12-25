@@ -407,10 +407,12 @@ function parseBlurayTitles(buffer) {
       return toSec(b.duration) - toSec(a.duration);
     });
     
-    // 添加显示索引和主标题标记
+    // 添加显示索引、主标题标记和秒数
     blurayTitles.forEach((t, i) => {
       t.displayIndex = i + 1;
       t.isMain = i === 0;  // 最长的是主标题
+      // 将时长字符串转换为秒数
+      t.durationSeconds = t.duration.split(':').reduce((acc, time) => acc * 60 + parseFloat(time), 0);
     });
     
     // 通知前端更新标题列表
