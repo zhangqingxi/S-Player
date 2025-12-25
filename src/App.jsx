@@ -740,18 +740,17 @@ function App() {
   // ==================== 工具函数 ====================
   
   /**
-   * 格式化时间为 H:MM:SS 或 M:SS 格式
+   * 格式化时间为 HH:MM:SS 格式（始终显示6位数字+2个冒号）
    * @param {number} s - 秒数
+   * @returns {string} 格式化后的时间字符串，如 "01:23:45" 或 "00:00:49"
    */
   const formatTime = useCallback((s) => {
-    if (!s || isNaN(s)) return '0:00';
+    if (!s || isNaN(s)) return '00:00:00';
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     const sec = Math.floor(s % 60);
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-    }
-    return `${m}:${sec.toString().padStart(2, '0')}`;
+    // 始终显示 HH:MM:SS 格式
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   }, []);
 
   /** 阻止右键菜单 */
@@ -983,37 +982,46 @@ function App() {
         </div>
       )}
       
-      {/* INFO 弹出菜单 - 显示完整影片信息 */}
+      {/* INFO 弹出菜单 - 显示完整影片信息（自适应高度） */}
       {showInfo && (
         <div 
           className="popup-menu visible"
           style={{ 
-            left: '20px',
+            left: '2%',
             right: 'auto',
-            top: '50px',
+            top: '2%',
             bottom: 'auto',
             transform: 'none',
             width: '400px', 
-            height: '470px',
-            cursor: 'default' 
+            height: '70vh',  // 自适应高度：70% 视口高度
+            cursor: 'default',
+            display: 'flex',
+            flexDirection: 'column'
           }}
         >
-          {/* 上部分：TMDB 影片信息 */}
+          {/* 上部分：TMDB 影片信息（40%）+ 简介（60%） */}
           {tmdbInfo && (
-            <>
-              {/* 左右布局：左侧封面图 + 右侧4行内容 */}
+            <div style={{ 
+              flex: '0 0 50%',  // 上部分占50%
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}>
+              {/* 影片信息区域（40%） */}
               <div style={{ 
-                padding: '12px', 
+                flex: '0 0 40%',
+                padding: '12px',
                 cursor: 'default',
                 pointerEvents: 'none',
                 display: 'flex',
-                gap: '12px'
+                gap: '12px',
+                overflow: 'hidden'
               }}>
                 {/* 左侧：封面图 */}
                 {tmdbInfo.posterUrl && (
                   <div style={{
                     flexShrink: 0,
-                    height: '120px',
+                    height: '100%',
                     width: 'auto',
                     borderRadius: '4px',
                     overflow: 'hidden',
@@ -1032,11 +1040,10 @@ function App() {
                   </div>
                 )}
                 
-                {/* 右侧：4行内容（平分120px高度） */}
+                {/* 右侧：4行内容 */}
                 <div style={{ 
                   flex: 1, 
                   minWidth: 0,
-                  height: '120px',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between'
@@ -1095,16 +1102,18 @@ function App() {
                 </div>
               </div>
               
-              {/* 下方：简介（独立一行，填满剩余空间，可滚动，隐藏滚动条） */}
+              {/* 简介区域（60%） */}
               <div style={{ 
+                flex: '0 0 60%',
                 padding: '0 12px 12px 12px',
-                cursor: 'default'
+                cursor: 'default',
+                overflow: 'hidden'
               }}>
                 <div style={{ 
                   fontSize: '12px', 
                   color: 'rgba(255,255,255,0.7)', 
                   lineHeight: '1.6',
-                  height: '105px',
+                  height: '100%',
                   overflowY: 'auto',
                   pointerEvents: 'auto',
                   scrollbarWidth: 'none',
@@ -1115,14 +1124,14 @@ function App() {
                   {tmdbInfo.overview}
                 </div>
               </div>
-            </>
+            </div>
           )}
           
           {/* 如果没有 TMDB 信息，显示文件名 */}
           {!tmdbInfo && currentFileName && (
             <div style={{ 
-              padding: '12px', 
-              borderBottom: '1px solid rgba(255,255,255,0.15)',
+              flex: '0 0 50%',
+              padding: '12px',
               cursor: 'default',
               pointerEvents: 'none'
             }}>
@@ -1132,28 +1141,37 @@ function App() {
             </div>
           )}
           
-          {/* 下部分：技术信息 */}
-          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>分辨率</span>
-            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{videoParams?.w || 0}x{videoParams?.h || 0}</span>
-          </div>
-          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>视频</span>
-            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getVideoCodec(videoCodec)}</span>
-          </div>
-          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>音频</span>
-            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getCurrentAudioTrack()}</span>
-          </div>
-          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>字幕</span>
-            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getCurrentSubTrack()}</span>
-          </div>
-          <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-            <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>码率</span>
-            <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>
-              {videoBitrate > 0 ? `${(videoBitrate / 1000).toFixed(2)} Mbps` : '计算中...'}
-            </span>
+          {/* 下部分：技术信息（50%，自动填充剩余空间） */}
+          <div style={{ 
+            flex: '1',
+            overflowY: 'auto',
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none'
+          }}
+          className="info-overview-scroll"
+          >
+            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>分辨率</span>
+              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{videoParams?.w || 0}x{videoParams?.h || 0}</span>
+            </div>
+            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>视频</span>
+              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getVideoCodec(videoCodec)}</span>
+            </div>
+            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>音频</span>
+              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getCurrentAudioTrack()}</span>
+            </div>
+            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>字幕</span>
+              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getCurrentSubTrack()}</span>
+            </div>
+            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
+              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>码率</span>
+              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>
+                {videoBitrate > 0 ? `${(videoBitrate / 1000).toFixed(2)} Mbps` : '计算中...'}
+              </span>
+            </div>
           </div>
         </div>
       )}
