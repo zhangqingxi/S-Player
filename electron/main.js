@@ -66,6 +66,7 @@ function createWindow() {
   const initialSize = { width: 1000, height: 600 };
   
   mainWindow = new BrowserWindow({
+    icon: path.join(__dirname, '../icon.ico'), // 设置窗口图标
     width: initialSize.width,
     height: initialSize.height,
     minWidth: 800,      // 最小宽度，防止窗口太小

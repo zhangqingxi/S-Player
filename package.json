@@ -1,6 +1,6 @@
 {
   "name": "s-player",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "基于 MPV 的现代化视频播放器，支持蓝光、多音轨、多字幕",
   "main": "electron/main.js",
   "scripts": {
@@ -32,7 +32,8 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "mpv.exe"
+      "mpv.exe",
+      "icon.ico"
     ],
     "extraResources": [
       {
