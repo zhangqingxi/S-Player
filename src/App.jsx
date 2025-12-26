@@ -68,26 +68,26 @@ const getCodec = (codec) => {
  * @param {string} codec - 原始编解码器字符串
  */
 const getVideoCodec = (codec) => {
-  if (!codec) return '未知';
+  if (!codec) return '';
   const lowerCodec = codec.toLowerCase();
   
   // H.265/HEVC
   if (lowerCodec.includes('hevc') || lowerCodec.includes('h265')) {
-    if (lowerCodec.includes('main 10') || lowerCodec.includes('main10')) return 'H.265 Main10';
-    return 'H.265';
+    if (lowerCodec.includes('main 10') || lowerCodec.includes('main10')) return 'HEVC 10bit';
+    return 'HEVC';
   }
   
   // H.264/AVC
   if (lowerCodec.includes('h264') || lowerCodec.includes('avc')) {
-    if (lowerCodec.includes('high')) return 'H.264 High';
     return 'H.264';
   }
   
   // 其他格式
+  if (lowerCodec.includes('av1')) return 'AV1';
   if (lowerCodec.includes('vp9')) return 'VP9';
   if (lowerCodec.includes('mpeg2')) return 'MPEG-2';
   
-  return codec.substring(0, 20);
+  return codec.substring(0, 10).toUpperCase();
 };
 
 /**
@@ -165,6 +165,23 @@ const getSubType = (codec) => {
   return codec.substring(0, 15);
 };
 
+/**
+ * 根据分辨率获取视频质量标签
+ * @param {number} width - 视频宽度
+ * @param {number} height - 视频高度
+ * @returns {string} 质量标签
+ */
+const getVideoQuality = (width, height) => {
+  if (!width || !height) return 'SD';
+  
+  // 按高度判断
+  if (height >= 2160 || width >= 3840) return '4K';
+  if (height >= 1440 || width >= 2560) return '2K';
+  if (height >= 1080 || width >= 1920) return 'FHD';
+  if (height >= 720 || width >= 1280) return 'HD';
+  return 'SD';
+};
+
 // ==================== 主组件 ====================
 
 /**
@@ -222,8 +239,13 @@ function App() {
   const [currentTitle, setCurrentTitle] = useState(null);  // 当前蓝光标题
   
   // TMDB 电影信息
-  const [tmdbInfo, setTmdbInfo] = useState(null);          // TMDB电影数据
+  const [tmdbInfo, setTmdbInfo] = useState(null);          // 当前TMDB电影数据
   const [currentFileName, setCurrentFileName] = useState(''); // 当前文件名
+  
+  // 合集电影支持
+  const [movieTitles, setMovieTitles] = useState([]);      // 所有标题列表 [{title, year}, ...]
+  const [currentMovieIndex, setCurrentMovieIndex] = useState(0);  // 当前显示索引
+  const [tmdbCache, setTmdbCache] = useState({});          // TMDB缓存 {"title_year": tmdbInfo}
   
   // 实时码率
   const [videoBitrate, setVideoBitrate] = useState(0);     // 视频码率 (kbps)
@@ -232,12 +254,17 @@ function App() {
   // 退出确认对话框
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
+  // 派生状态
+  const showHome = pageState === 'home';
+
   // ==================== Refs ====================
   
   const initialized = useRef(false);           // 防止重复初始化
   const hideTimer = useRef(null);              // 控制栏隐藏定时器
   const lastPositionRef = useRef(0);           // 上一次播放位置（用于检测进度变化）
-  const isLoadingRef = useRef(false);          // Loading 状态的 ref（用于事件处理器访问最新值）
+  const isLoadingRef = useRef(false);          // Loading 状态的 ref
+  const tmdbTimer = useRef(null);              // TMDB请求延迟定时器
+  const lastMoveTimeRef = useRef(0);           // 鼠标移动节流
   
   // 按钮 refs（用于计算弹出菜单位置）
   const audioButtonRef = useRef(null);
@@ -430,6 +457,11 @@ function App() {
 
     // 鼠标移动时显示控制栏，3秒后自动隐藏
     const handleMove = () => {
+      // 节流：100ms
+      const now = Date.now();
+      if (now - lastMoveTimeRef.current < 100) return;
+      lastMoveTimeRef.current = now;
+
       setShowControls(true);
       if (hideTimer.current) {
         clearTimeout(hideTimer.current);
@@ -488,50 +520,59 @@ function App() {
   // TMDB Bearer Token
   const TMDB_BEARER_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyZjFkYWM4MGFlODA4YjBhNjNhNTI0YmU1Mjc3YmMyNSIsIm5iZiI6MTY3OTY2MDE5Ni4yODQsInN1YiI6IjY0MWQ5NGE0OGRlMGFlMDA4MzlhOTA5NiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.0gCSVC3FRm6C37XrAuZ2hBYlAV3Ff2yPNTB4faiSPS4';
   
-  // 从文件名提取电影标题和年份
-  const extractTitleFromFileName = (filePath) => {
-    const fileName = filePath.split(/[\\/]/).pop();
+  // 从文件名提取电影标题和年份（支持合集返回数组）
+  // 策略：从文件名提取英文标题 + 年份
+  const extractTitlesFromFileName = (filePath) => {
+    const fileName = filePath.split(/[\\/]/).pop() || '';
     
-    // 🔥 处理合集：检测 + 或 2in1, 3in1 等标记
-    // 例如: "Movie1.1976+Movie2.1980.iso" 或 "Movie1+Movie2 2in1.iso"
-    let processedFileName = fileName;
+    // 清理单个标题片段，提取英文标题和年份
+    const cleanTitle = (segment) => {
+      // 提取年份
+      const yearMatch = segment.match(/\b(19\d{2}|20\d{2})\b/);
+      const year = yearMatch ? yearMatch[1] : null;
+      
+      // 清理标题
+      let title = segment
+        .replace(/\.[^.]+$/, '')  // 移除扩展名
+        .replace(/\[(.*?)\]/g, '')  // 移除方括号内容
+        .replace(/@[\w]+/g, '')  // 移除@组名
+        .replace(/\b(19\d{2}|20\d{2})\b/g, '')  // 移除年份
+        .replace(/\d{4}p?/gi, '')  // 移除分辨率
+        .replace(/(MULTi|COMPLETE|UHD|4K|2160p|1080p|720p|HDR|DV|SDR|REMUX)/gi, '')
+        .replace(/(BluRay|BDRip|WEB-DL|WEBRip|HDRip|DVDRip|BRRip|HDTV)/gi, '')
+        .replace(/(x264|x265|HEVC|AVC|H\.264|H\.265|10bit)/gi, '')
+        .replace(/(AAC|DTS|TrueHD|Atmos|FLAC|DD|AC3|EAC3|LPCM)/gi, '')
+        .replace(/(DIY|Repack|Proper|EXTENDED|Directors\.Cut)/gi, '')
+        .replace(/\b(GBR|USA|FRA|JPN|CHN|KOR|HKG|TWN)\b/gi, '')
+        .replace(/(\d+)in1/gi, '')
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      
+      return { title, year };
+    };
     
-    // 检测合集标记
-    const collectionMatch = fileName.match(/^([^+]+)\+/);  // 匹配第一个 + 之前的内容
-    const multiMatch = fileName.match(/(\d+)in1/i);  // 匹配 2in1, 3in1 等
+    // 检测是否是合集：2in1/3in1 等标记
+    const multiMatch = fileName.match(/(\d+)in1/i);
     
-    if (collectionMatch || multiMatch) {
-      // 这是一个合集，只提取第一部电影（+ 之前的部分）
-      if (collectionMatch) {
-        processedFileName = collectionMatch[1];
-        console.log('检测到合集（+分隔），提取第一部:', processedFileName);
-      }
+    if (multiMatch) {
+      // 合集：取 XinX 之前的部分，用 + 分割
+      const baseName = fileName.replace(/\.[^.]+$/, '');
+      const collectionPart = baseName.split(/\.\d+in1/i)[0];
+      const segments = collectionPart.split('+');
+      
+      const titles = segments.map(seg => cleanTitle(seg)).filter(t => t.title);
+      
+      console.log('检测到合集:', multiMatch[1] + 'in1');
+      console.log('解析出标题:', titles);
+      
+      return titles;
     }
     
-    // 提取年份（4位数字，从处理后的文件名中提取第一个年份）
-    const yearMatch = processedFileName.match(/\b(19\d{2}|20\d{2})\b/);
-    const year = yearMatch ? yearMatch[1] : null;
-    
-    // 移除扩展名和常见标记
-    let title = processedFileName
-      .replace(/\.[^.]+$/, '')  // 移除扩展名
-      .replace(/\[(.*?)\]/g, '')  // 移除方括号内容
-      .replace(/@[\w]+/g, '')  // 移除@组名如@HDSky
-      .replace(/\b(19\d{2}|20\d{2})\b/g, '')  // 移除年份
-      .replace(/\d{4}p?/gi, '')  // 移除分辨率
-      .replace(/(MULTi|COMPLETE|UHD|4K|2160p|1080p|720p|HDR|DV|SDR|REMUX)/gi, '')
-      .replace(/(BluRay|BDRip|WEB-DL|WEBRip|HDRip|DVDRip|BRRip|HDTV)/gi, '')
-      .replace(/(x264|x265|HEVC|AVC|H\.264|H\.265|10bit)/gi, '')
-      .replace(/(AAC|DTS|TrueHD|Atmos|FLAC|DD|AC3|EAC3|LPCM)/gi, '')
-      .replace(/(DIY|Repack|Proper|EXTENDED|Directors\.Cut)/gi, '')
-      .replace(/\b(GBR|USA|FRA|JPN|CHN|KOR|HKG|TWN)\b/gi, '')  // 移除国家代码
-      .replace(/(\d+)in1/gi, '')  // 移除 2in1, 3in1 等标记
-      .replace(/[._-]+/g, ' ')  // 替换分隔符为空格
-      .replace(/\s+/g, ' ')  // 合并多个空格
-      .trim();
-    
-    console.log('提取标题:', title, '年份:', year, '来自文件:', fileName);
-    return { title, year };
+    // 普通单片
+    const result = cleanTitle(fileName);
+    console.log('单片标题:', result.title, '年份:', result.year);
+    return [result];
   };
   
   // 获取TMDB电影信息
@@ -541,7 +582,7 @@ function App() {
     try {
       // 1. 搜索电影
       const searchRes = await fetch(
-        `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(titleInfo.title)}&language=zh-CN`,
+        `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(titleInfo.title)}&language=zh-CN&year=${titleInfo.year}`,
         {
           headers: {
             'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`,
@@ -556,23 +597,19 @@ function App() {
         return;
       }
       
-      // 2. 通过英文名和年份匹配最佳结果
-      let bestMatch = searchData.results[0];
+      // 按评分降序排序
+      const sortedResults = [...searchData.results].sort((a, b) => 
+        (b.vote_average || 0) - (a.vote_average || 0)
+      );
+
+      console.log('TMDB搜索结果:', sortedResults);
       
-      if (titleInfo.year) {
-        // 如果有年份，优先匹配年份相同的电影
-        const yearMatch = searchData.results.find(movie => 
-          movie.release_date && movie.release_date.startsWith(titleInfo.year)
-        );
-        if (yearMatch) {
-          bestMatch = yearMatch;
-          console.log('通过年份匹配到电影:', bestMatch.title, bestMatch.release_date);
-        }
-      }
+      // 2. 精确匹配 最高评分
+      let bestMatch = sortedResults[0];
       
-      // 3. 获取详细信息
+      // 3. 获取详细信息（包含分级信息）
       const detailRes = await fetch(
-        `https://api.themoviedb.org/3/movie/${bestMatch.id}?language=zh-CN`,
+        `https://api.themoviedb.org/3/movie/${bestMatch.id}?language=zh-CN&append_to_response=release_dates`,
         {
           headers: {
             'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`,
@@ -582,7 +619,7 @@ function App() {
       );
       const detailData = await detailRes.json();
       
-      // 4. 获取演员信息
+      // 4. 获取演职员信息（包含导演）
       const creditsRes = await fetch(
         `https://api.themoviedb.org/3/movie/${bestMatch.id}/credits?language=zh-CN`,
         {
@@ -594,35 +631,86 @@ function App() {
       );
       const creditsData = await creditsRes.json();
       
-      // 5. 筛选领衔主演和主演
+      // 5. 筛选导演
+      const directors = creditsData.crew
+        ?.filter(person => person.job === 'Director')
+        .map(person => person.name) || [];
+      
+      // 6. 筛选领衔主演
       const mainCast = creditsData.cast
         ?.filter(actor => actor.order < 5)  // 前5位演员
         .map(actor => actor.name) || [];
       
-      // 6. 构建海报URL
+      // 7. 获取分级（优先中国、美国、其他）
+      let certification = '';
+      const releaseDates = detailData.release_dates?.results || [];
+      const cnRelease = releaseDates.find(r => r.iso_3166_1 === 'CN');
+      const usRelease = releaseDates.find(r => r.iso_3166_1 === 'US');
+      const anyRelease = releaseDates.find(r => r.release_dates?.[0]?.certification);
+      
+      if (cnRelease?.release_dates?.[0]?.certification) {
+        certification = cnRelease.release_dates[0].certification;
+      } else if (usRelease?.release_dates?.[0]?.certification) {
+        certification = usRelease.release_dates[0].certification;
+      } else if (anyRelease?.release_dates?.[0]?.certification) {
+        certification = anyRelease.release_dates[0].certification;
+      }
+      
+      // 8. 获取制作国家/地区（取第一个）
+      const countries = detailData.production_countries || [];
+      const region = countries.length > 0 
+        ? (countries[0].iso_3166_1 === 'US' ? '美国' 
+            : countries[0].iso_3166_1 === 'CN' ? '中国'
+            : countries[0].iso_3166_1 === 'HK' ? '中国香港'
+            : countries[0].iso_3166_1 === 'TW' ? '中国台湾'
+            : countries[0].iso_3166_1 === 'JP' ? '日本'
+            : countries[0].iso_3166_1 === 'KR' ? '韩国'
+            : countries[0].iso_3166_1 === 'GB' ? '英国'
+            : countries[0].iso_3166_1 === 'FR' ? '法国'
+            : countries[0].iso_3166_1 === 'DE' ? '德国'
+            : countries[0].name)
+        : '';
+      
+      // 9. 获取类型
+      const genres = detailData.genres?.map(g => g.name) || [];
+      
+      // 10. 构建海报URL
       const posterUrl = detailData.poster_path 
         ? `https://media.themoviedb.org/t/p/w300_and_h450_face${detailData.poster_path}`
         : null;
       
-      setTmdbInfo({
+      const tmdbData = {
         title: detailData.title || bestMatch.title,
         originalTitle: detailData.original_title,
-        overview: detailData.overview || '暂无简介',
+        overview: (detailData.overview || '暂无简介').trimStart(),
         releaseDate: detailData.release_date,
         rating: detailData.vote_average,
+        runtime: detailData.runtime,
+        certification: certification,
+        region: region,
+        genres: genres,
+        directors: directors,
         cast: mainCast,
         posterUrl: posterUrl
-      });
+      };
       
       console.log('TMDB信息获取成功:', {
-        title: detailData.title,
-        year: detailData.release_date?.split('-')[0],
-        cast: mainCast,
-        poster: posterUrl
+        '标题': detailData.title,
+        '年份': detailData.release_date?.split('-')[0],
+        '时长': detailData.runtime,
+        '分级': certification,
+        '地区': region,
+        '类型': genres,
+        '导演': directors,
+        '演员': mainCast,
+        '海报': posterUrl
       });
+      
+      return tmdbData;
       
     } catch (e) {
       console.log('TMDB获取失败:', e.message);
+      return null;
     }
   }, []);
   
@@ -635,14 +723,30 @@ function App() {
       setCurrentTitle(null);
       setBlurayTitles([]);
       setTmdbInfo(null);
+      setTmdbCache({});  // 清空缓存
+      setCurrentMovieIndex(0);  // 重置索引
       
       // 重置进度 ref，因为打开文件是全新的播放
       lastPositionRef.current = 0;
       
-      // 保存文件名并获取TMDB信息
-      const titleInfo = extractTitleFromFileName(filePath);
-      setCurrentFileName(titleInfo.title);
-      fetchTMDBInfo(titleInfo);
+      // 解析文件名获取标题列表（支持合集）
+      const titles = extractTitlesFromFileName(filePath);
+      setMovieTitles(titles);
+      setCurrentFileName(titles[0]?.title || '');
+      
+      // 请求所有标题的TMDB信息并缓存
+      titles.forEach((titleInfo, index) => {
+        fetchTMDBInfo(titleInfo).then(data => {
+          if (data) {
+            const cacheKey = `${titleInfo.title}_${titleInfo.year || ''}`;
+            setTmdbCache(prev => ({ ...prev, [cacheKey]: data }));
+            // 第一个标题默认显示
+            if (index === 0) {
+              setTmdbInfo(data);
+            }
+          }
+        });
+      });
       
       window.api.play(filePath);
     }
@@ -686,7 +790,7 @@ function App() {
   const handleVolumeChange = useCallback((e) => {
     const val = parseInt(e.target.value, 10);
     setVolume(val);
-    window.api.cmd(['set', 'volume', val]);
+    window.api.cmd(['set_property', 'volume', val]);
   }, []);
 
   // ==================== 轨道切换 ====================
@@ -718,6 +822,34 @@ function App() {
     window.api.cmd(['seek', time, 'absolute']);
     setActivePopup(null);  // 关闭弹出菜单
   }, []);
+
+  /** 切换合集电影（INFO面板用） */
+  const switchMovie = useCallback((direction) => {
+    if (movieTitles.length <= 1) return;
+    
+    let newIndex;
+    if (direction === 'next') {
+      newIndex = (currentMovieIndex + 1) % movieTitles.length;
+    } else {
+      newIndex = (currentMovieIndex - 1 + movieTitles.length) % movieTitles.length;
+    }
+    
+    setCurrentMovieIndex(newIndex);
+    
+    const newMovie = movieTitles[newIndex];
+    const cacheKey = `${newMovie.title}_${newMovie.year || ''}`;
+    
+    if (tmdbCache[cacheKey]) {
+      // 缓存中有数据，直接使用
+      setTmdbInfo(tmdbCache[cacheKey]);
+    } else {
+      // 缓存中没有，请求 TMDB
+      setTmdbInfo(null);  // 先清空，显示加载状态
+      fetchTMDBInfo(newMovie);
+    }
+    
+    console.log('切换到电影:', newMovie.title, '索引:', newIndex);
+  }, [movieTitles, currentMovieIndex, tmdbCache, fetchTMDBInfo]);
 
   /** 切换蓝光标题 */
   const switchTitle = useCallback((edition) => {
@@ -775,9 +907,7 @@ function App() {
     return `${track.type || 'SUB'} - ${track.lang || '未知'}`;
   };
 
-  // 是否显示首页
-  const showHome = pageState === 'home';
-  
+
   /**
    * 切换弹出菜单
    * @param {string} type - 菜单类型: 'audio' | 'sub' | 'chapter' | 'title' | 'info'
@@ -982,195 +1112,333 @@ function App() {
         </div>
       )}
       
-      {/* INFO 弹出菜单 - 显示完整影片信息（自适应高度） */}
+      {/* INFO 弹出菜单 - Netflix/Apple TV 沉浸式风格 */}
       {showInfo && (
         <div 
           className="popup-menu visible"
           style={{ 
             left: '2%',
             right: 'auto',
-            top: '2%',
+            top: '50px',
             bottom: 'auto',
             transform: 'none',
-            width: '400px', 
-            height: '70vh',  // 自适应高度：70% 视口高度
+            width: '420px', 
+            height: 'auto',
+            maxHeight: 'calc(100vh - 150px)',
             cursor: 'default',
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            overflow: 'hidden',
+            position: 'relative',
+            background: 'transparent'
           }}
         >
-          {/* 上部分：TMDB 影片信息（40%）+ 简介（60%） */}
-          {tmdbInfo && (
+          {/* 高斯模糊背景层 */}
+          {tmdbInfo?.posterUrl && (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundImage: `url(${tmdbInfo.posterUrl})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              filter: 'blur(30px) brightness(0.3)',
+              transform: 'scale(1.2)',
+              zIndex: 0
+            }}></div>
+          )}
+          
+          {/* 深色蒙层 */}
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.6)',
+            backdropFilter: 'blur(12px)',
+            zIndex: 1
+          }}></div>
+          
+          {/* 内容层 */}
+          <div style={{ 
+            position: 'relative', 
+            zIndex: 2, 
+            display: 'flex', 
+            flexDirection: 'column',
+            flex: 1,
+            minHeight: 0,
+            overflow: 'hidden'
+          }}>
+
+            {/* ===== 顶部：封面 + 标题信息 ===== */}
             <div style={{ 
-              flex: '0 0 50%',  // 上部分占50%
               display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden'
+              padding: '20px 20px 10px 20px',
+              gap: '18px',
+              alignItems: 'flex-start'
             }}>
-              {/* 影片信息区域（40%） */}
+              {/* 悬浮封面图 */}
+              {tmdbInfo?.posterUrl && (
+                <div style={{
+                  flexShrink: 0,
+                  width: '115px',
+                  borderRadius: '6px',
+                  overflow: 'hidden',
+                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)'
+                }}>
+                  <img 
+                    src={tmdbInfo.posterUrl} 
+                    alt={tmdbInfo?.title || ''}
+                    style={{
+                      width: '100%',
+                      height: 'auto',
+                      display: 'block'
+                    }}
+                  />
+                </div>
+              )}
+              
+              {/* 右侧：标题区 */}
               <div style={{ 
-                flex: '0 0 40%',
-                padding: '12px',
-                cursor: 'default',
-                pointerEvents: 'none',
+                flex: 1,
+                minWidth: 0,
                 display: 'flex',
-                gap: '12px',
-                overflow: 'hidden'
+                flexDirection: 'column',
+                gap: '4px' // 极度压缩间距
               }}>
-                {/* 左侧：封面图 */}
-                {tmdbInfo.posterUrl && (
-                  <div style={{
-                    flexShrink: 0,
-                    height: '100%',
-                    width: 'auto',
-                    borderRadius: '4px',
-                    overflow: 'hidden',
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
+                {/* 第一层：大标题（独占一行，允许换行） */}
+                <div style={{ 
+                  fontSize: '22px', 
+                  fontWeight: '700', 
+                  color: '#888', 
+                  lineHeight: '1.3',
+                  letterSpacing: '0.5px'
+                }}>
+                  {tmdbInfo?.title || currentFileName || '未知影片'}
+                </div>
+                
+                {/* 第二层：评分 + 分级 + 合集切换（胶囊风格） */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  marginTop: '2px'
+                }}>
+                  {/* 评分 */}
+                  {tmdbInfo?.rating && (
+                    <span style={{
+                      color: '#FFD700',
+                      fontWeight: '700',
+                      fontSize: '13px',
+                      textShadow: '0 0 8px rgba(255, 215, 0, 0.5)'
+                    }}>
+                      ★ {tmdbInfo.rating.toFixed(1)}
+                    </span>
+                  )}
+                  
+                  {/* 分级 */}
+                  {tmdbInfo?.certification && (
+                    <span style={{
+                      padding: '1px 6px',
+                      border: '1px solid #e74c3c',
+                      borderRadius: '3px',
+                      fontSize: '10px',
+                      color: '#e74c3c',
+                      fontWeight: '600'
+                    }}>
+                      {tmdbInfo.certification}
+                    </span>
+                  )}
+                  
+                  {/* 合集切换（仅有合集时显示，胶囊样式） */}
+                  {movieTitles.length > 1 && (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      border: '1px solid rgba(255,255,255,0.3)',
+                      borderRadius: '3px',
+                      padding: '1px 6px',
+                      fontSize: '10px',
+                      color: '#888'
+                    }}>
+                      <button
+                        onClick={() => switchMovie('prev')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#888',
+                          cursor: 'pointer',
+                          padding: '0 2px'
+                        }}
+                      >◀</button>
+                      <span>
+                        {currentMovieIndex + 1}/{movieTitles.length}
+                      </span>
+                      <button
+                        onClick={() => switchMovie('next')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#888',
+                          cursor: 'pointer',
+                          padding: '0 2px'
+                        }}
+                      >▶</button>
+                    </div>
+                  )}
+                </div>
+                
+                {/* 第三层：元数据 */}
+                {tmdbInfo && (
+                  <div style={{ 
+                    fontSize: '12px', 
+                    color: '#888', 
+                    letterSpacing: '0.5px',
+                    marginTop: '2px'
                   }}>
-                    <img 
-                      src={tmdbInfo.posterUrl} 
-                      alt={tmdbInfo.title}
-                      style={{
-                        height: '100%',
-                        width: 'auto',
-                        display: 'block',
-                        objectFit: 'cover'
-                      }}
-                    />
+                    {[
+                      tmdbInfo.releaseDate?.split('-')[0],
+                      tmdbInfo.region,
+                      tmdbInfo.runtime && `${tmdbInfo.runtime}分钟`,
+                      tmdbInfo.genres?.slice(0, 2).join('/')
+                    ].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+
+                
+                {/* 第三层：技术特征标签 */}
+                <div style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap', 
+                  gap: '6px',
+                  marginTop: '2px'
+                }}>
+                  {/* 分辨率标签 - 主色调紫蓝 */}
+                  <span style={{
+                    padding: '3px 10px',
+                    background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.4), rgba(118, 75, 162, 0.4))',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    color: '#c4b5fd',
+                    fontWeight: '600',
+                    letterSpacing: '0.5px'
+                  }}>
+                    {getVideoQuality(videoParams?.w, videoParams?.h)}
+                  </span>
+                  {/* 编码标签 - 蓝绿色 */}
+                  {getVideoCodec(videoCodec) && (
+                    <span style={{
+                      padding: '3px 10px',
+                      background: 'rgba(46, 204, 113, 0.15)',
+                      border: '1px solid rgba(46, 204, 113, 0.4)',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      color: '#2ecc71'
+                    }}>
+                      {getVideoCodec(videoCodec)}
+                    </span>
+                  )}
+                  {/* HDR/DV 标签 - 亮色突出 */}
+                  {videoCodec && (videoCodec.toLowerCase().includes('main 10') || videoCodec.toLowerCase().includes('main10')) && (
+                    <span style={{
+                      padding: '3px 10px',
+                      background: 'linear-gradient(135deg, rgba(255, 193, 7, 0.3), rgba(255, 152, 0, 0.3))',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      color: '#FFD54F',
+                      fontWeight: '600'
+                    }}>
+                      HDR
+                    </span>
+                  )}
+                  {/* 码率标签 - 青色 */}
+                  <span style={{
+                    padding: '3px 10px',
+                    background: 'rgba(52, 152, 219, 0.15)',
+                    border: '1px solid rgba(52, 152, 219, 0.4)',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    color: '#3498db'
+                  }}>
+                    {videoBitrate > 0 ? `${(videoBitrate / 1000).toFixed(1)} Mbps` : '...'}
+                  </span>
+                </div>
+                
+                {/* 第四层：演职员 */}
+                {tmdbInfo && (
+                  <div style={{ 
+                    fontSize: '11px', 
+                    color: '#888', 
+                    lineHeight: '1.6',
+                    marginTop: '2px'
+                  }}>
+                    {tmdbInfo.directors?.length > 0 && (
+                      <div>
+                        <span style={{ color: '#888' }}>导演：</span>
+                        <span style={{ fontWeight: '500', color: '#888' }}>
+                          {tmdbInfo.directors.join(' / ')}
+                        </span>
+                      </div>
+                    )}
+                    {tmdbInfo.cast?.length > 0 && (
+                      <div style={{ marginTop: '3px' }}>
+                        <span style={{ color: '#888' }}>主演：</span>
+                        <span>{tmdbInfo.cast.slice(0, 5).join(' / ')}</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 
-                {/* 右侧：4行内容 */}
+                {/* 音频/字幕信息 */}
                 <div style={{ 
-                  flex: 1, 
-                  minWidth: 0,
+                  fontSize: '10px', 
+                  color: '#888', 
+                  marginTop: '4px',
                   display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between'
+                  gap: '12px'
                 }}>
-                  {/* 第1行：标题 */}
-                  <div style={{ 
-                    fontSize: '12px', 
-                    fontWeight: '700', 
-                    color: 'white', 
-                    lineHeight: '1.3',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}>
-                    {tmdbInfo.title}
-                  </div>
-                  
-                  {/* 第2行：原标题 */}
-                  {tmdbInfo.originalTitle !== tmdbInfo.title && (
-                    <div style={{ 
-                      fontSize: '12px', 
-                      color: 'rgba(255,255,255,0.5)', 
-                      lineHeight: '1.3',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap'
-                    }}>
-                      {tmdbInfo.originalTitle}
-                    </div>
-                  )}
-                  
-                  {/* 第3行：年份和评分 */}
-                  <div style={{ 
-                    fontSize: '12px', 
-                    color: 'rgba(255,255,255,0.7)', 
-                    lineHeight: '1.3'
-                  }}>
-                    {tmdbInfo.releaseDate?.split('-')[0]} · 评分 {tmdbInfo.rating?.toFixed(1)}
-                  </div>
-                  
-                  {/* 第4行：演员 */}
-                  {tmdbInfo.cast.length > 0 && (
-                    <div style={{ 
-                      fontSize: '12px', 
-                      color: 'rgba(255,255,255,0.6)', 
-                      lineHeight: '1.4',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical'
-                    }}>
-                      {tmdbInfo.cast.join(' / ')}
-                    </div>
-                  )}
+                  <span>🔊 {getCurrentAudioTrack()}</span>
+                  <span>💬 {getCurrentSubTrack()}</span>
                 </div>
               </div>
-              
-              {/* 简介区域（60%） */}
-              <div style={{ 
-                flex: '0 0 60%',
-                padding: '0 12px 12px 12px',
-                cursor: 'default',
-                overflow: 'hidden'
-              }}>
+            </div>
+            
+            {/* ===== 简介区域（flex:1 填充剩余空间） ===== */}
+            <div style={{ 
+              flex: 1,
+              padding: '0 20px 0 20px', // 减少顶部padding，让横线往上提
+              textIndent: '25px',
+              marginBottom: '10px',
+              overflowY: 'auto',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              minHeight: '60px'
+            }}
+            className="info-overview-scroll"
+            >
+              {tmdbInfo?.overview ? (
                 <div style={{ 
                   fontSize: '12px', 
-                  color: 'rgba(255,255,255,0.7)', 
-                  lineHeight: '1.6',
-                  height: '100%',
-                  overflowY: 'auto',
-                  pointerEvents: 'auto',
-                  scrollbarWidth: 'none',
-                  msOverflowStyle: 'none'
-                }}
-                className="info-overview-scroll"
-                >
+                  color: '#888', 
+                  lineHeight: '1.8',
+                  textAlign: 'justify'
+                }}>
                   {tmdbInfo.overview}
                 </div>
-              </div>
-            </div>
-          )}
-          
-          {/* 如果没有 TMDB 信息，显示文件名 */}
-          {!tmdbInfo && currentFileName && (
-            <div style={{ 
-              flex: '0 0 50%',
-              padding: '12px',
-              cursor: 'default',
-              pointerEvents: 'none'
-            }}>
-              <div style={{ fontSize: '12px', fontWeight: '600', color: 'white' }}>
-                {currentFileName}
-              </div>
-            </div>
-          )}
-          
-          {/* 下部分：技术信息（50%，自动填充剩余空间） */}
-          <div style={{ 
-            flex: '1',
-            overflowY: 'auto',
-            scrollbarWidth: 'none',
-            msOverflowStyle: 'none'
-          }}
-          className="info-overview-scroll"
-          >
-            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>分辨率</span>
-              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{videoParams?.w || 0}x{videoParams?.h || 0}</span>
-            </div>
-            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>视频</span>
-              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getVideoCodec(videoCodec)}</span>
-            </div>
-            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>音频</span>
-              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getCurrentAudioTrack()}</span>
-            </div>
-            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>字幕</span>
-              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>{getCurrentSubTrack()}</span>
-            </div>
-            <div className="popup-menu-item" style={{ cursor: 'default', pointerEvents: 'none', fontSize: '12px' }}>
-              <span className="popup-menu-item-left" style={{ fontSize: '12px' }}>码率</span>
-              <span className="popup-menu-item-right" style={{ fontSize: '12px' }}>
-                {videoBitrate > 0 ? `${(videoBitrate / 1000).toFixed(2)} Mbps` : '计算中...'}
-              </span>
+              ) : (
+                <div style={{ 
+                  fontSize: '12px', 
+                  color: '#555', 
+                  textAlign: 'center'
+                }}>
+                  暂无简介
+                </div>
+              )}
             </div>
           </div>
         </div>
